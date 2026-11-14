@@ -1,0 +1,503 @@
+/**
+ * Club Penguin Island - Web API Server
+ *
+ * Main entry point for the game's HTTP API.
+ * Routes are organized into separate modules for maintainability.
+ */
+
+import { logUrl, logSafe } from "./utils/logSafe.ts";
+import { markRoomFull, parseRoomName } from "./utils/roomCap.ts";
+import express from "express";
+import * as db from "./database.ts";
+import config from "./config.ts";
+import { logger, errorHandler, notFoundHandler, authenticate, requireGameLogin, isGameApiPath } from "./middleware/index.ts";
+import { rateLimit, clientAddress } from "./utils/rateLimit.ts";
+import * as routes from "./routes/index.ts";
+import { encryptionMiddleware } from "./routes/encryption.ts";
+import { incrementTask as incrementDailyTask } from "./routes/task.ts";
+import { effectiveRole, isStaffAdmin, isStaffRole } from "./utils/staffRoles.ts";
+import { isInternalRequest } from "./utils/internalSecret.ts";
+import { isBanned, activeMute, activeMutes, setMute, liftMute } from "./services/moderation.ts";
+import { appearanceOf } from "./utils/appearance.ts";
+import { purgeChatLog } from "./services/chatLog.ts";
+
+// Initialize Express app
+const app = express();
+app.disable('x-powered-by');
+
+// =============================================================================
+// Middleware
+// =============================================================================
+
+// The client's HTTP layer (Unity WWW) can only send GET and POST, so PUT
+// and DELETE arrive as POST with an X-HTTP-Method-Override header. Restore
+// the real verb before routing.
+app.use((req, res, next) => {
+    const override = req.headers['x-http-method-override'];
+    if (req.method === 'POST' && typeof override === 'string' && ['PUT', 'DELETE', 'PATCH'].includes(override.toUpperCase())) {
+        req.method = override.toUpperCase();
+        console.log(`[HTTP] ${logUrl(req.url)}: POST -> ${req.method} (X-HTTP-Method-Override), content-type=${req.headers['content-type'] ?? '(none)'}, length=${req.headers['content-length'] ?? '?'}`);
+    }
+    next();
+});
+
+// Capture raw body for encrypted requests (before JSON parsing)
+// The header alone selects this path (before any login), so the body is
+// bounded: the client's encrypted calls are small JSON documents.
+const MAX_ENCRYPTED_BODY_BYTES = 1024 * 1024;
+app.use((req, res, next) => {
+    if (req.headers['x-encryption-key-id']) {
+        const tooLarge = () => {
+            console.log(`[HTTP] ${logUrl(req.url)}: encrypted body over ${MAX_ENCRYPTED_BODY_BYTES} bytes, refused`);
+            res.set('Connection', 'close').status(413).json({ error: 'Request body too large' });
+        };
+        if (Number(req.headers['content-length']) > MAX_ENCRYPTED_BODY_BYTES) return tooLarge();
+        let chunks: Buffer[] = [];
+        let size = 0;
+        let refused = false;
+        req.on('data', chunk => {
+            if (refused) return;
+            size += chunk.length;
+            if (size > MAX_ENCRYPTED_BODY_BYTES) {
+                refused = true;
+                chunks = [];
+                tooLarge();
+                return;
+            }
+            chunks.push(chunk);
+        });
+        req.on('end', () => {
+            if (refused) return;
+            (req as any).rawBody = Buffer.concat(chunks);
+            next();
+        });
+    } else {
+        next();
+    }
+});
+
+// Body parsing - skip for application/mix (encrypted Mix API requests) and encrypted CP requests
+// CPI's report call sends the reason as the bare text ChatSwearing (not even a
+// quoted JSON string) under Content-Type application/json (the client's
+// HttpRequestJsonBodyAttribute sends a string field as-is), so a JSON parser
+// rejects it before the route runs. The route reads it as text and accepts
+// bare text, a JSON string or {"reason": ...} (routes/moderation.ts).
+app.use('/moderation/v1/report', express.text({ type: (req) => !req.headers['x-encryption-key-id'], limit: '8kb' }));
+app.use(express.json({
+    type: (req) => {
+        const contentType = req.headers['content-type'] || '';
+        // Skip JSON parsing for encrypted Mix API requests
+        if (contentType.includes('application/mix')) {
+            return false;
+        }
+        // Skip JSON parsing for encrypted CP API requests (we handle it in middleware)
+        if (req.headers['x-encryption-key-id']) {
+            return false;
+        }
+        return contentType.includes('json');
+    }
+}));
+app.use(express.text({ type: 'text/plain' })); // For quest status updates which send just a number
+// Unity's web request defaults to application/x-www-form-urlencoded, and
+// some client builds send their JSON bodies under it. Read those as JSON;
+// anything that isn't JSON stays unparsed (no route takes form data).
+app.use(express.text({
+    type: (req) => !req.headers['x-encryption-key-id'] && (req.headers['content-type'] || '').includes('application/x-www-form-urlencoded'),
+}));
+app.use((req, res, next) => {
+    if (typeof req.body === 'string' && (req.headers['content-type'] || '').includes('application/x-www-form-urlencoded')) {
+        const text = req.body.trim();
+        let parsed = {};
+        if (text.startsWith('{') || text.startsWith('[')) {
+            try { parsed = JSON.parse(text); } catch { /* not JSON: leave it empty */ }
+        }
+        req.body = parsed;
+    }
+    next();
+});
+// Allow raw binary bodies for encrypted Mix API requests
+app.use(express.raw({ type: 'application/mix', limit: '10mb' }));
+
+// Request logging
+app.use(logger);
+
+// Game API call limits. Both are far above what the client does (a room
+// load makes a few dozen calls) and only stop a script. Per address first,
+// so a flood of bad tokens is cut off before it costs lookups; then per
+// account, so one account can't use up the server. 0 turns either off.
+const tooManyRequests = (res: express.Response) => { res.status(429).json({ error: 'Too many requests' }); };
+app.use(rateLimit({
+    name: 'game-api/address', envVar: 'GAME_API_PER_IP_PER_MIN', defaultLimit: 1500, windowMs: 60_000, onLimited: tooManyRequests,
+    keyOf: (req) => isGameApiPath(req.path) ? clientAddress(req) : null,
+}));
+
+// The island client's CDN boot files (404 while the admin switch is off). Before
+// authentication: a stale Basic header must not turn them into a JSON 401,
+// which the client would cache.
+app.use(routes.cdnRoutes);
+
+// Authentication - extracts player identity from Basic Auth headers
+app.use(authenticate);
+app.use(requireGameLogin);
+app.use(rateLimit({
+    name: 'game-api/account', envVar: 'GAME_API_PER_ACCOUNT_PER_MIN', defaultLimit: 600, windowMs: 60_000, onLimited: tooManyRequests,
+    keyOf: (req) => isGameApiPath(req.path) && (req as any).player?.isAuthenticated ? `acct:${(req as any).player.swid}` : null,
+}));
+
+// Encryption middleware - handles encrypted CP API requests
+app.use(encryptionMiddleware);
+
+// =============================================================================
+// Routes
+// =============================================================================
+
+// Internal endpoints, called only by the game server: loopback, not
+// through a proxy, and with the shared secret (utils/internalSecret.ts).
+
+app.post('/api/internal/add-coins', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    try {
+        const { username, coins } = req.body;
+        if (!username || coins === undefined) {
+            return res.status(400).json({ error: 'Missing username or coins' });
+        }
+        db.addPlayerCoins(username, coins);
+        console.log(`[INTERNAL-API] Added ${coins} coins to ${username}`);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('[INTERNAL-API] Error adding coins:', error);
+        res.status(500).json({ error: 'Internal error' });
+    }
+});
+
+/**
+ * POST /api/internal/grant-reward
+ * Called by the game server when its own logic decides a reward is earned,
+ * so grants don't depend on the client relaying them. Same reward shape as
+ * PUT /reward/v1.
+ */
+app.post('/api/internal/grant-reward', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    try {
+        const { username, reward } = req.body;
+        if (!username || !reward) {
+            return res.status(400).json({ error: 'Missing username or reward' });
+        }
+        const granted = routes.applyRewards(username, reward);
+        console.log(`[INTERNAL-API] Granted reward to ${username} from game server:`, granted);
+        res.json({ success: true, reward: granted, assets: db.getPlayerAssets(username) });
+    } catch (error) {
+        console.error('[INTERNAL-API] Error granting reward:', error);
+        res.status(500).json({ error: 'Internal error' });
+    }
+});
+
+/**
+ * POST /api/internal/quest-objective
+ * Called by the game server on quest.c_obj. Records the objective and
+ * grants its reward from quests.json.
+ */
+app.post('/api/internal/quest-objective', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    try {
+        const { username, objective } = req.body;
+        if (!username || !objective) {
+            return res.status(400).json({ error: 'Missing username or objective' });
+        }
+        const reward = routes.grantQuestObjectiveReward(username, objective);
+        console.log(`[INTERNAL-API] Objective ${objective} for ${username}: ${reward ? `granted ${JSON.stringify(reward)}` : 'no reward / already granted'}`);
+        res.json({ success: true, reward });
+    } catch (error) {
+        console.error('[INTERNAL-API] Error granting quest objective reward:', error);
+        res.status(500).json({ error: 'Internal error' });
+    }
+});
+
+/**
+ * POST /api/internal/session-ended
+ * The game server reports a closed connection, so the player stops showing
+ * as online. Body: { sessionId } (the joinRoomData sessionId).
+ */
+app.post('/api/internal/session-ended', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    const sessionId = Number(req.body?.sessionId);
+    if (!Number.isSafeInteger(sessionId)) return res.status(400).json({ error: 'Missing or invalid sessionId' });
+    db.deleteSession(sessionId);
+    console.log(`[INTERNAL-API] Session ${sessionId} ended`);
+    res.json({ success: true });
+});
+
+/**
+ * POST /api/internal/sessions-alive
+ * The game server's periodic list of its live connections (joinRoomData
+ * sessionIds): their confirmed sessions are refreshed so they keep counting
+ * as online (room cap, friends) however long they last. Body: { sessionIds }.
+ */
+app.post('/api/internal/sessions-alive', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    const ids = req.body?.sessionIds;
+    if (!Array.isArray(ids) || ids.length > 10_000 || !ids.every((id) => Number.isSafeInteger(id))) {
+        return res.status(400).json({ error: 'sessionIds must be up to 10,000 integers' });
+    }
+    res.json({ success: true, refreshed: db.touchConfirmedSessions(ids) });
+});
+
+/**
+ * POST /api/internal/room-full
+ * The game server refused a login into this room (its room ceiling), so the
+ * room counts as full here for a minute and the client's room-full retry is
+ * sent elsewhere instead of back into it. Body: { room } (the signed room
+ * name, world:language:room:instance:content).
+ */
+app.post('/api/internal/room-full', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    const parsed = parseRoomName(req.body?.room);
+    if (!parsed) return res.status(400).json({ error: 'Missing or invalid room' });
+    markRoomFull(parsed.world, parsed.room, parsed.instanceId, parsed.clientVersion);
+    console.log(`[INTERNAL-API] Room ${logSafe(parsed.world)}/${logSafe(parsed.room)} marked full by the game server`);
+    res.json({ success: true });
+});
+
+/**
+ * POST /api/internal/session-started
+ * The game server saw the SFS login of a join, so the player is online until
+ * the connection closes. Until then a join counts as online for about a
+ * minute only. Body: { sessionId }.
+ */
+app.post('/api/internal/session-started', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    const sessionId = Number(req.body?.sessionId);
+    if (!Number.isSafeInteger(sessionId)) return res.status(400).json({ error: 'Missing or invalid sessionId' });
+    res.json({ success: true, known: db.confirmSession(sessionId) });
+});
+
+/**
+ * POST /api/internal/sessions-reset
+ * The game server just started: every connection from before it is gone, and
+ * their close was never reported. Clears all sessions.
+ */
+app.post('/api/internal/sessions-reset', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    const cleared = db.clearAllSessions();
+    console.log(`[INTERNAL-API] Game server started, ${cleared} stale session(s) cleared`);
+    res.json({ success: true, cleared });
+});
+
+/**
+ * POST /api/internal/task-increment
+ * The game server reports a counted daily-challenge event.
+ * Body: { username, taskId, times }. Returns { counter, changed, completed }.
+ */
+app.post('/api/internal/task-increment', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    const { username, taskId, times } = req.body ?? {};
+    if (typeof username !== 'string' || typeof taskId !== 'string' || !Number.isInteger(times) || times < 1) {
+        return res.status(400).json({ error: 'Missing or invalid username, taskId or times' });
+    }
+    const result = incrementDailyTask(username, taskId, times);
+    if (!result) return res.status(404).json({ error: 'Unknown task' });
+    res.json(result);
+});
+
+/**
+ * POST /api/internal/identity
+ * The game server resolves the account and staff role behind a login's
+ * signed swid. Body: { swid }. Returns { username, role, banned }; a
+ * banned account's connection is closed by the game server.
+ */
+app.post('/api/internal/identity', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    const swid = req.body?.swid;
+    if (typeof swid !== 'string') return res.status(400).json({ error: 'Missing or invalid swid' });
+    const row = db.getPlayerIdentityAndRole(swid);
+    if (!row) return res.status(404).json({ error: 'Unknown swid' });
+    res.json({ username: row.username, role: effectiveRole(row.username, row.role), banned: !!isBanned(swid), mutedUntil: activeMute(swid)?.until ?? null });
+});
+
+/**
+ * POST /api/internal/appearance
+ * The game server checks what a client says it looks like (colour, tube,
+ * outfit) against what is saved for the account. Body: { swid }. Returns
+ * { colour, tubeId, parts }, the worn items in the outfit endpoint's shape.
+ */
+app.post('/api/internal/appearance', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    const swid = req.body?.swid;
+    if (typeof swid !== 'string') return res.status(400).json({ error: 'Missing or invalid swid' });
+    const row = db.getPlayerIdentityAndRole(swid);
+    if (!row) return res.status(404).json({ error: 'Unknown swid' });
+    res.json(appearanceOf(row.username));
+});
+
+/**
+ * POST /api/internal/banned
+ * The game server's periodic check of who is online, so a ban reaches a
+ * player who is already connected. Body: { swids }. Returns { banned },
+ * the swids among them with an active ban or lock.
+ */
+app.post('/api/internal/banned', express.json({ limit: '1mb' }), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    const swids = req.body?.swids;
+    if (!Array.isArray(swids) || swids.length > 10000 || !swids.every((s) => typeof s === 'string')) {
+        return res.status(400).json({ error: 'Missing or invalid swids' });
+    }
+    res.json({ banned: swids.filter((s) => isBanned(s)) });
+});
+
+/**
+ * POST /api/internal/moderation-state
+ * The game server's periodic check of who is online: bans and chat mutes
+ * in one call. Body: { swids }. Returns { banned: [swid], mutes: { swid:
+ * untilIso } }. /api/internal/banned stays for older game servers.
+ */
+app.post('/api/internal/moderation-state', express.json({ limit: '1mb' }), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    const swids = req.body?.swids;
+    if (!Array.isArray(swids) || swids.length > 10000 || !swids.every((s) => typeof s === 'string')) {
+        return res.status(400).json({ error: 'Missing or invalid swids' });
+    }
+    res.json({ banned: swids.filter((s) => isBanned(s)), mutes: activeMutes(swids) });
+});
+
+const MUTE_RANKS = new Set(['moderator', 'admin']);
+const shortText = (v, max) => typeof v === 'string' && v.length >= 1 && v.length <= max;
+
+/**
+ * POST /api/internal/mute
+ * :mute in game. Body: { swid, minutes (1-10080), setBy, setByRank
+ * (moderator|admin), reason? }. Returns { until }; 403 { error: "rank" }
+ * when an active mute was set by a higher rank.
+ */
+app.post('/api/internal/mute', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    const { swid, minutes, setBy, setByRank, reason } = req.body ?? {};
+    if (!shortText(swid, 128) || !Number.isInteger(minutes) || minutes < 1 || minutes > 10080 || !shortText(setBy, 80)
+        || !MUTE_RANKS.has(setByRank) || (reason !== undefined && reason !== null && !shortText(reason, 500))) {
+        return res.status(400).json({ error: 'Invalid mute' });
+    }
+    const row = setMute(swid, minutes, setBy, setByRank, reason ?? null);
+    if (row === 'rank') return res.status(403).json({ error: 'rank' });
+    res.json({ until: row.until });
+});
+
+/**
+ * POST /api/internal/unmute
+ * :unmute in game. Body: { swid, by, byRank }. Returns { lifted }; 403
+ * { error: "rank" } when the mute was set by a higher rank.
+ */
+app.post('/api/internal/unmute', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    const { swid, by, byRank } = req.body ?? {};
+    if (!shortText(swid, 128) || !shortText(by, 80) || !MUTE_RANKS.has(byRank)) return res.status(400).json({ error: 'Invalid unmute' });
+    const r = liftMute(swid, by, byRank);
+    if (r === 'rank') return res.status(403).json({ error: 'rank' });
+    res.json({ lifted: r === 'lifted' });
+});
+
+/**
+ * POST /api/internal/set-role
+ * :promote / :demote. Body: { username, role }; the username may differ
+ * in case when that matches only one account. Returns
+ * { success, username, role }; 409 for STAFF_ADMINS accounts.
+ */
+app.post('/api/internal/set-role', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    const { username, role } = req.body ?? {};
+    if (typeof username !== 'string' || !isStaffRole(role)) return res.status(400).json({ error: 'Missing username or unknown role' });
+    const canonical = db.findUsernameNoCase(username);
+    if (!canonical) return res.status(404).json({ error: 'Unknown username' });
+    if (isStaffAdmin(canonical)) return res.status(409).json({ error: 'config admin' });
+    db.setPlayerRole(canonical, role);
+    console.log(`[INTERNAL-API] Role of ${canonical} set to ${role}`);
+    res.json({ success: true, username: canonical, role });
+});
+
+// Mount all route modules
+app.use(routes.sessionRoutes);
+app.use(routes.gameRoutes);
+app.use(routes.playerRoutes);
+app.use(routes.questRoutes);
+app.use(routes.rewardRoutes);
+app.use(routes.inventoryRoutes);
+app.use(routes.catalogRoutes);
+app.use(routes.taskRoutes);
+app.use(routes.consumableRoutes);
+app.use(routes.tutorialRoutes);
+app.use(routes.breadcrumbRoutes);
+app.use(routes.iglooRoutes);
+app.use(routes.captchaRoutes);
+app.use(routes.chatRoutes);
+app.use(routes.minigameRoutes);
+app.use(routes.moderationRoutes);
+app.use(routes.disneystoreRoutes);
+app.use(routes.tubeRoutes);
+app.use(routes.eventRoutes);
+app.use(routes.partyRoutes);
+app.use(routes.encryptionRoutes);
+app.use(routes.membershipRoutes);
+app.use(routes.guestcontrollerRoutes);
+// Disney Mix content CDN (manifest + files); before the Mix routes.
+app.use(routes.cpipeRoutes);
+// Mix routes at /mix (tools/mix-config.ts's mix_platform_services_url) and at
+// the root (CPI and the prebuilt Mix build). Two separate mounts: an array
+// mount is one layer whose '/' alternative always wins, so /mix/... 404'd.
+app.use('/mix', routes.mixRoutes);
+app.use(routes.mixRoutes);
+app.use(routes.diagnosticsRoutes);
+
+// =============================================================================
+// Error Handling
+// =============================================================================
+
+// 404 handler
+app.use(notFoundHandler);
+
+// Global error handler
+app.use(errorHandler);
+
+// =============================================================================
+// Graceful Shutdown
+// =============================================================================
+
+function shutdown() {
+    console.log('\n[SERVER] Shutting down...');
+    db.closeDatabase();
+    process.exit(0);
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+
+// =============================================================================
+// Start Server
+// =============================================================================
+
+// Expired encryption keys, API keys and tokens can't be used; delete them at
+// startup and every 10 minutes. Encryption and API keys need no login, so
+// the tables would otherwise grow with every anonymous call.
+const purgeExpired = () => {
+    db.cleanupExpiredEncryptionKeys();
+    db.cleanupExpiredApiKeys();
+    db.cleanupExpiredGuestTokens();
+};
+purgeExpired();
+setInterval(purgeExpired, 10 * 60_000).unref?.();
+
+// Room chat log (services/chatLog.ts): drop rows older than the retention
+// setting at startup and every 6 hours.
+const purgeChat = () => {
+    try {
+        const n = purgeChatLog();
+        if (n > 0) console.log(`[CHAT-LOG] purged ${n} rows past retention`);
+    } catch (err) {
+        console.error(`[CHAT-LOG] purge failed: ${(err as Error).name}`);
+    }
+};
+purgeChat();
+setInterval(purgeChat, 6 * 3600_000).unref?.();
+
+app.listen(Number(config.server.port), config.server.host, () => {
+    console.log(`CPI Web API listening at http://${config.server.host}:${config.server.port}`);
+    console.log('[DATABASE] Using SQLite for persistent storage (bun:sqlite)');
+    console.log('[CONFIG] Game server:', config.gameServer.ip + ':' + config.gameServer.tcpPort);
+});
