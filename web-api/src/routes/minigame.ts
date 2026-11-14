@@ -24,21 +24,74 @@ function signedResponse(data, swid) {
     };
 }
 
-// What each prize id pays.
-const PRIZE_COINS = { fish_common: 10, fish_rare: 25, fish_epic: 50, coins_10: 10, coins_25: 25, coins_50: 50 };
+// What each prize id pays. Ids are LootTableRewardDefinition.Id values and
+// the amounts are Coins.Amount from each prize's Reward asset.
+const PRIZE_COINS = {
+    'Seaweed': 2,
+    'Small Fish 1': 5,
+    'Small Fish 2': 5,
+    'Cactus': 5,
+    'Clam': 10,
+    'Medium Fish 1': 10,
+    'Medium Fish 2': 5,
+    'Medium Fish 4': 10,
+    'Medium Fish 5': 10,
+    'Medium Fish 6': 5,
+    'Medium Fish 7': 5,
+    'Medium Fish 8': 10,
+    'Medium Fish 3': 15,
+    'Large Fish 1': 15,
+    'Large Fish 2': 20,
+    'Squid': 20,
+    'Anchor': 35,
+    'Venus Fly Trap': 45,
+};
 
 // The client (FishingController.onFishingResultReceived) reads the prize map
 // with the fixed keys "Common", "Rare" and "Legendary" and needs all three.
 // Each pool holds the prize names that rarity can offer. The values MUST be
-// loot reward definition names that exist in the client content, otherwise
-// setupFishing() throws and no fish spawn.
+// loot reward definition Ids from the client content. An unknown name does not
+// throw: MinigameService.GetLootRewardDefinition silently falls back to the
+// first definition, so every prize would look the same.
+// Ids and weights come from the LootTableReward_* assets. Bucket mapping is
+// inferred from the assets' bucket guids: 89fa... = Common, c82d... = Rare,
+// 9863... = Legendary. The Quest bucket (88a6...) is deliberately left out.
 const PRIZE_POOLS = {
-    Common:    ['fish_common', 'coins_10'],
-    Rare:      ['fish_rare',   'coins_25'],
-    Legendary: ['fish_epic',   'coins_50'],
+    Common: [
+        { id: 'Cactus',        weight: 4 },
+        { id: 'Clam',          weight: 3 },
+        { id: 'Medium Fish 1', weight: 3 },
+        { id: 'Medium Fish 2', weight: 3 },
+        { id: 'Medium Fish 4', weight: 3 },
+        { id: 'Medium Fish 5', weight: 3 },
+        { id: 'Medium Fish 6', weight: 3 },
+        { id: 'Medium Fish 7', weight: 3 },
+        { id: 'Medium Fish 8', weight: 3 },
+        { id: 'Seaweed',       weight: 3 },
+        { id: 'Small Fish 1',  weight: 3 },
+        { id: 'Small Fish 2',  weight: 2 },
+    ],
+    Rare: [
+        { id: 'Large Fish 1',  weight: 4 },
+        { id: 'Large Fish 2',  weight: 4 },
+        { id: 'Medium Fish 3', weight: 3 },
+        { id: 'Squid',         weight: 5 },
+    ],
+    Legendary: [
+        { id: 'Anchor',        weight: 6 },
+        { id: 'Venus Fly Trap', weight: 4 },
+    ],
 };
 
-const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+// Weighted random pick of a prize id from a pool.
+const pick = (pool) => {
+    let roll = Math.random() * pool.reduce((sum, p) => sum + p.weight, 0);
+    for (const p of pool) {
+        roll -= p.weight;
+        if (roll < 0) return p.id;
+    }
+    return pool[pool.length - 1].id;
+};
 
 // Web service event types (shared contract with
 // smartfox-server/src/handlers/web-service-event.ts)
