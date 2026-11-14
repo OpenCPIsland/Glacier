@@ -1,0 +1,32 @@
+node_modules/
+
+# Runtime state
+*.db
+*.db-shm
+*.db-wal
+
+# Never commit game clients or binaries
+*.apk
+*.xapk
+*.ipa
+*.exe
+*.dmg
+*.msi
+
+# Editor/OS junk
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Per-deployment Mix boot config (bun tools/mix-config.ts render <url> --out ...)
+web-api/data/mix/cpipe/donotcopy/
+# Rebuilt Mix asset bundles (Disney assets), filled per deployment by
+# bun tools/mix-content.ts import
+web-api/data/mix/cpipe/AssetBundles/
+
+# Key that signs joinRoomData for the SmartFox login (auto-created)
+.iceberg-join-key
+
+# Working specs and plans (kept locally, not published)
+docs/superpowers/
