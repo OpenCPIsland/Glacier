@@ -56,7 +56,7 @@ function initializeDatabase() {
     db.exec(`
         CREATE TABLE IF NOT EXISTS players (
             username TEXT PRIMARY KEY,
-            profile_colour INTEGER DEFAULT 3235500,
+            profile_colour INTEGER DEFAULT 15,
             profile_days_old INTEGER DEFAULT 1,
             claimed_welcome_kit INTEGER DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
