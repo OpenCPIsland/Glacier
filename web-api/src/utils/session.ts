@@ -62,3 +62,19 @@ export function generateSessionId(): number {
 export function generateEquipmentId(): number {
     return crypto.randomInt(100000000, 2147483647);
 }
+/**
+ * Add this function to session.ts (it uses fs and config, already imported there).
+ *
+ * Look up a player's current session ID, as saved by saveSessionForUser.
+ * Returns null when there is no saved session.
+ */
+export function getSessionIdForUser(username: string): number | null {
+    try {
+        if (!fs.existsSync(config.sessionFile)) return null;
+        const sessions = JSON.parse(fs.readFileSync(config.sessionFile, 'utf8'));
+        const id = sessions?.[username]?.sessionId;
+        return typeof id === 'number' ? id : null;
+    } catch (e) {
+        return null;
+    }
+}
