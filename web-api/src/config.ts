@@ -108,7 +108,7 @@ const config = {
     // Default player values
     defaults: {
         startingCoins: 1000,
-        profileColour: 3235500,
+        profileColour: 23,
         daysOld: 1,
         defaultDurable: 15
     },
