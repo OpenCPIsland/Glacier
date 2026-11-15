@@ -103,11 +103,15 @@ const MAX_ROOM_PICKUPS = 200;
 const RESPAWN_SLACK_MS = 5000;
 
 router.post('/reward/v1/room', (req, res) => {
+console.log('[REWARD] ct=', req.headers['content-type'], 'len=', req.headers['content-length'], 'enc=', req.headers['content-encoding'], 'body=', JSON.stringify(req.body)?.slice(0, 600));
     const { username } = req.player;
     const inRoomRewards = req.body?.data || req.body?.Data || req.body || {};
     const room = typeof inRoomRewards.room === 'string' ? inRoomRewards.room : '';
     const collected = inRoomRewards.collected && typeof inRoomRewards.collected === 'object' ? inRoomRewards.collected : {};
     const roomPickupables = Object.hasOwn(config.pickupables, room) ? config.pickupables[room] : {};
+
+    console.log(`[REWARD] room=${logSafe(room)} known=${Object.hasOwn(config.pickupables, room)} paths=${Object.keys(collected).length}`);
+
 
     // Each pickup pays once per respawn, timed by our clock; the times the
     // client sends are ignored. Paths not in the room's pickupables pay
