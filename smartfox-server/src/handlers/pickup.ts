@@ -1,3 +1,6 @@
+// Original code ported straight from DumbFox
+// It will live on in Iceberg
+
 import { getUtfString } from "../wire-helpers.ts";
 import { SFSObjectWriter, encodePacket, type SFSObjectData } from "../sfs-wire.ts";
 import type { HandlerContext } from "./context.ts";
