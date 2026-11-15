@@ -34,7 +34,6 @@ const signed = {
     1, 13,
     new SFSObjectWriter()
       .putUtfString("c", "reward.room")
-      .putInt("r", 1)
       .putSFSObject("p", new SFSObjectWriter().putUtfString("reward", JSON.stringify(signed))),
   );
 console.log("[reward.room out]", JSON.stringify(signed));
