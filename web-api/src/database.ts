@@ -824,7 +824,7 @@ function getOrCreatePlayer(username) {
     // Create new player with defaults
     const stmt = db.prepare(`
         INSERT INTO players (username, profile_colour, profile_days_old, claimed_welcome_kit)
-        VALUES (?, 3235500, 1, 0)
+        VALUES (?, 23, 1, 0)
     `);
     stmt.run(username);
 
