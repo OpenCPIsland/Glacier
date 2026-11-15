@@ -143,7 +143,7 @@ function buildLocalPlayerData(username, swid) {
     const allEquipment = playerProgress.equipment || [];
     const outfitEquipment = allEquipment.filter(eq => equippedIds.includes(eq.equipmentId));
 
-    const profile = playerProgress.profile || { colour: 3235500, daysOld: 1 };
+    const profile = playerProgress.profile || { colour: 23, daysOld: 1 };
     
     // Convert tutorialData to signed bytes (sbyte in C#)
     const tutorialDataRaw = playerProgress.tutorialData || [];
@@ -293,7 +293,7 @@ export function buildOtherPlayerData(username, swid, displayName = null) {
     const allEquipment = playerProgress.equipment || [];
     const outfitEquipment = allEquipment.filter(eq => equippedIds.includes(eq.equipmentId));
 
-    const profile = playerProgress.profile || { colour: 3235500, daysOld: 1 };
+    const profile = playerProgress.profile || { colour: 23, daysOld: 1 };
     
     return {
         // PlayerId
@@ -347,7 +347,7 @@ function buildUnknownPlayerData(swid, displayName) {
         onlineLocation: null,
         member: true,
         outfit: [],
-        profile: { colour: 3235500, daysOld: 1 },
+        profile: { colour: 23, daysOld: 1 },
         mascotXP: {},
         zoneId: null
     };
@@ -401,7 +401,7 @@ router.post('/player/v1/profile', (req, res) => {
     
     const currentProfile = db.getPlayerProfile(username);
     
-    const colour = req.body.colour ?? currentProfile.colour ?? 3235500;
+    const colour = req.body.colour ?? currentProfile.colour ?? 23;
     const daysOld = currentProfile.daysOld ?? 1;
     
     db.updatePlayerProfile(username, colour, daysOld);
