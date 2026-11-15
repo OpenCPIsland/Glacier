@@ -11,6 +11,7 @@
 import express from "express";
 const router = express.Router();
 import * as db from "../database.ts";
+import { getSessionIdForUser } from "../utils/session.ts"; // adjust path if session.ts lives elsewhere
 
 /**
  * Wrap response in SignedResponse format
@@ -167,10 +168,15 @@ router.post('/minigame/v1/fishing/catch', (req, res) => {
     // Add coins to player
     if (coinReward > 0) db.addPlayerCoins(username, coinReward);
 
-    // Build reward structure
+    // Build reward structure. The client parses each reward map key with
+    // long.Parse, so the key must be the player's numeric session ID (the one
+    // SFS2X uses), not the swid. With no saved session send an empty map:
+    // the client then shows nothing, but the coins above are still saved.
     const reward = {
         coins: coinReward
     };
+    const sessionId = getSessionIdForUser(username);
+    const rewardMap = sessionId !== null ? { [String(sessionId)]: reward } : {};
 
     // Response: FishingCatchResponse
     // wsEvents is forwarded by the client to the game server as wsevent.1,
@@ -178,10 +184,8 @@ router.post('/minigame/v1/fishing/catch', (req, res) => {
     // get one. Each entry is signed on its own.
     res.json({
         rewards: signedResponse({
-            rewards: {
-                [swid]: reward
-            },
-            source: 'MINI_GAME',
+            rewards: rewardMap,
+            source: 5, // RewardSource.MINI_GAME (client enum, sent as its number)
             sourceId: 'fishing'
         }, swid),
         wsEvents: offered
