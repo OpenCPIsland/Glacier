@@ -92,16 +92,14 @@ variables.
 
 ## License
 
-[AGPL-3.0](LICENSE). If you run a modified version as a public server,
+Based on Iceberg by [tboskkk](https://github.com/tboskkk), licensed under [AGPL-3.0](LICENSE). If you run a modified version as a public server,
 you have to share your changes.
 
 ## Credits
 Special thanks to the following people who have made Glacier possible:
 
-Original author
 > [tboskkk](https://github.com/tboskkk)
 
-Fork developers
 > [broimluna](https://github.com/broimluna)
 
 > [wednesday2024](https://github.com/wednesday2024)
