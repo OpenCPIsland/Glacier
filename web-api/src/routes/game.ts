@@ -49,8 +49,8 @@ const roomFull = (res) => res.status(409).json({ code: 1000 });
  * world here is the one new joins land in. Players can pick any world from
  * the client's own list; worlds are separate rooms on the game server.
  */
-const DEFAULT_WORLD = 'Iceberg';
-const AVAILABLE_WORLDS = [DEFAULT_WORLD, 'Alpine', 'Blizzard', 'Glacier', 'Summit'];
+const DEFAULT_WORLD = 'Glacier';
+const AVAILABLE_WORLDS = [DEFAULT_WORLD, 'Alpine', 'Blizzard', 'Iceberg', 'Summit'];
 
 /**
  * World, language and room names sit inside the signed room identifier
