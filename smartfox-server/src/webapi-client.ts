@@ -264,6 +264,17 @@ export async function reportRoomFull(roomName: string): Promise<void> {
   }
 }
 
+export async function fetchRoomCollected(username: string, room: string): Promise<Record<string, number> | null> {
+  try {
+    const res = await fetch(`${WEBAPI_INTERNAL_URL}/api/internal/room-collected`, {
+      method: "POST", headers: internalHeaders(), body: JSON.stringify({ username, room }), signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { collected?: unknown };
+    return body.collected && typeof body.collected === "object" ? (body.collected as Record<string, number>) : null;
+  } catch { return null; }
+}
+
 // At startup: connections from before this process are gone and their close
 // was never reported, so the WebAPI forgets all sessions. Retried, since the
 // WebAPI may still be starting (both restart together on a deploy).
