@@ -170,6 +170,13 @@ app.post('/api/internal/add-coins', express.json(), (req, res) => {
     }
 });
 
+app.post('/api/internal/room-collected', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    const { username, room } = req.body ?? {};
+    if (typeof username !== 'string' || typeof room !== 'string') return res.status(400).json({ error: 'bad body' });
+    res.json({ collected: db.getRoomCollected(username, room) });
+});
+
 /**
  * POST /api/internal/grant-reward
  * Called by the game server when its own logic decides a reward is earned,
