@@ -249,7 +249,7 @@ function buildJoinRoomData(swid, username, displayName, sessionId, roomIdentifie
             profile: profile,
             quests: quests
         },
-        earnedRewards: extraOptions.earnedRewards || {},
+        earnedRewards: extraOptions.earnedRewards || db.getRoomCollected(username, roomIdentifier.split(':')[2] ?? ''),
         userName: displayName,
         membershipRights: { 
             swid: swid,
