@@ -99,6 +99,7 @@ const config = {
     },
 
     // Content identifiers
+    // live should be replaced by whatever the current content manifest is, depending on the CPI release
     content: {
         clientVersion: '1.13.0',
         contentVersion: 'live',
