@@ -149,15 +149,22 @@ export function handleLogin(params: SFSObjectData, ctx: HandlerContext, socket: 
   if (session.signedLogin && session.playerSessionId) void reportSessionStarted(session.playerSessionId);
 
   // JoinRoom push (RequestType.JoinRoom = 4), sent without the client
-  // asking. "ul" lists the other users already in the room, not the
-  // player. The client doesn't spawn avatars from "ul"; that only happens
+  // asking. "ul" lists the player first, then the other users already in
+  // the room. The client's user count (SFSGlobalUserManager.UserCount, which
+  // the igloo player-counter decoration shows through ServerUserCount) is the
+  // union of its joined rooms' user lists and only holds the player if "ul"
+  // has them, so leaving them out showed one penguin too few. The player's
+  // own entry carries the owner variable list (no colour/tube, see
+  // user-variables.ts). The client doesn't spawn avatars from "ul"; that only happens
   // through proximity updates, so the joiner also gets a proximity
   // snapshot and the room is told about the new arrival. Built at send
   // time so a JOIN_DELAY_MS delay still sees current state.
   const sendJoin = () => {
     if (socket.destroyed) return;
     const others = getByRoomExcluding(roomName, session.userId);
-    const ul = new SFSArrayWriter();
+    const ul = new SFSArrayWriter().putSFSArray(
+      new SFSArrayWriter().putInt(session.userId).putUtfString(session.userName).putShort(0).putShort(0).putSFSArray(buildUserVariablesArray(session, true))
+    );
     for (const entry of others) ul.putSFSArray(buildProximityUserEntry(entry.session, undefined));
     const joinRoomParams = new SFSObjectWriter().putSFSArray("r", buildRoomArray(1)).putSFSArray("ul", ul);
     ctx.send(encodePacket(0, 4, joinRoomParams));
