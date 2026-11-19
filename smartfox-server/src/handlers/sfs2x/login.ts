@@ -203,9 +203,10 @@ export function handleLogin(params: SFSObjectData, ctx: HandlerContext, socket: 
 // the 64-bit session id as a string.
 function sendInitialUserVariables(ctx: HandlerContext): void {
   const { session } = ctx;
-  const varList = buildUserVariablesArray(session);
+  // Colour and tube are left out of the owner's own list (user-variables.ts).
+  const varList = buildUserVariablesArray(session, true);
   ctx.send(encodePacket(0, 12, new SFSObjectWriter().putInt("u", session.userId).putSFSArray("vl", varList)));
   console.log(
-    `[${new Date().toISOString()}] ${ctx.peer} <- set user variables (sess, outfit${session.outfitJson !== undefined ? "" : "=absent"}, colour=${session.colour ?? 0}, tube=${session.selectedTubeId ?? 0}, loc=0, awayfromkeyboard=0, tempheadstatus=0)`
+    `[${new Date().toISOString()}] ${ctx.peer} <- set user variables (sess, outfit${session.outfitJson !== undefined ? "" : "=absent"}, loc=0, awayfromkeyboard=0, tempheadstatus=0)`
   );
 }

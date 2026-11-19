@@ -14,6 +14,7 @@ import { handleClientConChanged, type EquippedObject } from "../consumables.ts";
 import { onPlayerStateChanged } from "../../daily-tasks.ts";
 import type { HandlerContext } from "../context.ts";
 import { refreshAppearance, variableEntry } from "../../appearance.ts";
+import { isOwnerHiddenVariable } from "../../user-variables.ts";
 
 // RequestType.SetUserVariables = 12. The request carries only "vl"; the
 // server broadcasts {u, vl} to everyone in the room, including the sender.
@@ -40,7 +41,11 @@ export function handleSetUserVariables(params: SFSObjectData, ctx: HandlerContex
     if (echoed.length > 0) {
       const echo: SFSValue = { type: SFSDataType.SFS_ARRAY, value: echoed };
       const packet = encodePacket(0, 12, new SFSObjectWriter().putInt("u", ctx.session.userId).putRaw("vl", echo));
-      ctx.send(packet);
+      // The sender's echo leaves out colour and tube (user-variables.ts).
+      const own = echoed.filter((v) => !isOwnerHiddenVariable(v));
+      if (own.length > 0) {
+        ctx.send(own.length === echoed.length ? packet : encodePacket(0, 12, new SFSObjectWriter().putInt("u", ctx.session.userId).putRaw("vl", { type: SFSDataType.SFS_ARRAY, value: own })));
+      }
       for (const entry of getByRoomExcluding(ctx.session.roomName, ctx.session.userId)) entry.send(packet);
       console.log(`[${new Date().toISOString()}] ${ctx.peer} <- set user variables broadcast (u=${ctx.session.userId})`);
     }

@@ -17,6 +17,7 @@ import { SFSDataType, SFSObjectWriter, encodePacket, type OutgoingPacket, type S
 import { getByRoomExcluding, isRegistered } from "./session-registry.ts";
 import { fetchAppearance } from "./webapi-client.ts";
 import { onPlayerStateChanged } from "./daily-tasks.ts";
+import { isOwnerHiddenVariable } from "./user-variables.ts";
 import type { Session } from "./session.ts";
 
 export function variableEntry(name: string, kind: VariableKind, value: SFSValue): SFSValue {
@@ -94,7 +95,11 @@ export async function refreshAppearance(session: Session, send: (packet: Outgoin
 
   console.log(`[${new Date().toISOString()}] ${session.swid} - ${names.join(", ")} set to the saved value (${why})`);
   const packet = encodePacket(0, 12, new SFSObjectWriter().putInt("u", session.userId).putRaw("vl", { type: SFSDataType.SFS_ARRAY, value: changed }));
-  send(packet);
+  // The owner gets only the outfit back (user-variables.ts).
+  const own = changed.filter((v) => !isOwnerHiddenVariable(v));
+  if (own.length > 0) {
+    send(encodePacket(0, 12, new SFSObjectWriter().putInt("u", session.userId).putRaw("vl", { type: SFSDataType.SFS_ARRAY, value: own })));
+  }
   for (const entry of getByRoomExcluding(session.roomName, session.userId)) entry.send(packet);
   onPlayerStateChanged(session);
 }
