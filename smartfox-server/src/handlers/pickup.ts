@@ -34,11 +34,36 @@ function roomCollected(session: Session, room: string): RoomCollected {
 }
 
 export async function handlePickup(innerParams: SFSObjectData, ctx: HandlerContext): Promise<void> {
-  const id = getUtfString(innerParams, "id");
-  const collectibleType = getUtfString(innerParams, "t");
+  await recordPickup(ctx, getUtfString(innerParams, "id"), getUtfString(innerParams, "t"), "task.p");
+}
+
+// Interaction collectibles (plants and other "!" scenery/reward collectibles)
+// send no task.p: the client only sends an l.a Interact (action 2) with
+// o = ActionedObject {type: 0 = LOCAL, id: interaction object path, tag:
+// collectible type}. The original server (and the client's own offline
+// mode) counted that as a pickup, so it is answered the same way. Other
+// LOCAL interactions (benches, doors) carry a Unity tag such as
+// "Untagged" and are left alone; the web API pays only known paths anyway.
+const LOCOMOTION_ACTION_INTERACT = 2;
+const OBJECT_TYPE_LOCAL = 0;
+
+export async function handleInteractionPickup(ctx: HandlerContext, action: number, objectJson: string | undefined): Promise<void> {
+  if (action !== LOCOMOTION_ACTION_INTERACT || !objectJson) return;
+  let obj: { type?: unknown; id?: unknown; tag?: unknown };
+  try {
+    obj = JSON.parse(objectJson);
+  } catch {
+    return;
+  }
+  if (obj?.type !== OBJECT_TYPE_LOCAL || typeof obj.id !== "string" || typeof obj.tag !== "string") return;
+  if (!obj.tag || obj.tag === "Untagged") return;
+  await recordPickup(ctx, obj.id, obj.tag, "interact");
+}
+
+async function recordPickup(ctx: HandlerContext, id: string | undefined, collectibleType: string | undefined, source: string): Promise<void> {
   const room = zoneOfRoom(ctx.session.roomName);
   if (!id || id.length > MAX_ID_LENGTH || !room) {
-    console.log(`[${new Date().toISOString()}] ${ctx.peer} - task.p pickup ignored (id=${logSafe((id ?? "?").slice(0, 80))}, room=${logSafe(room || "?")})`);
+    console.log(`[${new Date().toISOString()}] ${ctx.peer} - ${source} pickup ignored (id=${logSafe((id ?? "?").slice(0, 80))}, room=${logSafe(room || "?")})`);
     return;
   }
   await ctx.session.identityReady;
@@ -51,5 +76,5 @@ export async function handlePickup(innerParams: SFSObjectData, ctx: HandlerConte
     .putUtfString("c", "reward.room")
     .putSFSObject("p", new SFSObjectWriter().putUtfString("reward", JSON.stringify(reward)));
   ctx.send(encodePacket(1, 13, params));
-  console.log(`[${new Date().toISOString()}] ${ctx.peer} - task.p pickup in ${logSafe(room)} (id=${logSafe(id)}, type=${logSafe(collectibleType ?? "?")}) -> reward.room (${Object.keys(collected).length} collected)`);
+  console.log(`[${new Date().toISOString()}] ${ctx.peer} - ${source} pickup in ${logSafe(room)} (id=${logSafe(id)}, type=${logSafe(collectibleType ?? "?")}) -> reward.room (${Object.keys(collected).length} collected)`);
 }

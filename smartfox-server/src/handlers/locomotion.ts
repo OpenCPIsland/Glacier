@@ -3,6 +3,7 @@ import { getFloatArray, getByte, getUtfString, fitsBytes } from "../wire-helpers
 import { getByRoomExcluding } from "../session-registry.ts";
 import { broadcastNewJoinerToRoom } from "./proximity.ts";
 import { handleConsumableInteraction, onInvitationAction } from "./consumables.ts";
+import { handleInteractionPickup } from "./pickup.ts";
 import { handleLobbyInteraction, onThrowAction } from "../party-games/lobby.ts";
 import { onPartyGameAction, onPartyGamePlayerMoved } from "../party-games/manager.ts";
 import { onIslandTargetThrow } from "../island-targets/playground.ts";
@@ -62,6 +63,10 @@ export function handleLocomotionAction(innerParams: SFSObjectData, ctx: HandlerC
   for (const entry of getByRoomExcluding(ctx.session.roomName, ctx.session.userId)) entry.send(packet);
   // Pinata hits, trays.
   handleConsumableInteraction(ctx, action, object);
+  // Plants and other interaction collectibles (pickup.ts).
+  void handleInteractionPickup(ctx, action, object).catch((err) =>
+    console.log(`[${new Date().toISOString()}] ${ctx.peer} - interaction pickup failed: ${(err as Error).message}`)
+  );
   // Party-game lobbies: interacting with the lobby item joins it (after
   // any snowball throw in progress).
   onThrowAction(ctx.session, action);
