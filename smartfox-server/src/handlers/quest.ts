@@ -1,5 +1,6 @@
 import { SFSObjectWriter, encodePacket, type SFSObjectData } from "../sfs-wire.ts";
-import { getUtfString, fitsBytes } from "../wire-helpers.ts";
+import { getUtfString, getInteger, fitsBytes } from "../wire-helpers.ts";
+import { getByRoomExcluding } from "../session-registry.ts";
 import { grantReward, grantQuestObjective, type RewardGrant } from "../webapi-client.ts";
 import type { HandlerContext } from "./context.ts";
 import { withAccount } from "../account.ts";
@@ -12,6 +13,23 @@ import { logSafe } from "../log-safe.ts";
 export function handleRewardBroadcast(innerParams: SFSObjectData, ctx: HandlerContext): void {
   const rewardJson = getUtfString(innerParams, "reward");
   console.log(`[${new Date().toISOString()}] ${ctx.peer} - reward.broadcast received (reward=${logSafe(rewardJson ?? "(none)")}), not echoing back (unconfirmed)`);
+}
+
+// "reward.levelup" - the client reports its own level-up with "level". It is
+// relayed to the rest of the room with "senderId", which plays the remote
+// level-up particles (RemotePlayerRewardManager). The sender plays its own.
+export function handleLevelUp(innerParams: SFSObjectData, ctx: HandlerContext): void {
+  const level = getInteger(innerParams, "level");
+  if (level === undefined || level < 1 || level > 0x7fffffff) return;
+  const packet = encodePacket(
+    1,
+    13,
+    new SFSObjectWriter()
+      .putUtfString("c", "reward.levelup")
+      .putSFSObject("p", new SFSObjectWriter().putInt("level", level).putInt("senderId", ctx.session.userId))
+  );
+  for (const entry of getByRoomExcluding(ctx.session.roomName, ctx.session.userId)) entry.send(packet);
+  console.log(`[${new Date().toISOString()}] ${ctx.peer} - reward.levelup relayed (level=${level})`);
 }
 
 // "quest.set" - ack with an empty "p" object. The client ignores the

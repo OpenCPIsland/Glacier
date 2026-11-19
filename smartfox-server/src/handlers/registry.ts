@@ -2,7 +2,7 @@ import type { SFSObjectData } from "../sfs-wire.ts";
 import type { HandlerContext } from "./context.ts";
 import { handleChatMsg, handleChatActivity } from "./chat.ts";
 import { handleLocomotionAction } from "./locomotion.ts";
-import { handleQuestSet, handleQuestCompleteObjective, handleRewardBroadcast } from "./quest.ts";
+import { handleQuestSet, handleQuestCompleteObjective, handleRewardBroadcast, handleLevelUp } from "./quest.ts";
 import { handleDurableEquip, handleDispensableEquip } from "./gear.ts";
 import { handleZoneLogout } from "./logout.ts";
 import { handleTimeGet } from "./time.ts";
@@ -44,6 +44,7 @@ export const extensionHandlers: Record<string, ExtensionHandler> = {
   "con.reuse": handleConsumableReuse,
   "pgame.message": handlePartyGameMessage,
   "reward.broadcast": handleRewardBroadcast,
+  "reward.levelup": handleLevelUp,
   "room.igloo_updated": handleIglooUpdated,
 };
 

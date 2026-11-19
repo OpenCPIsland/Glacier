@@ -240,7 +240,7 @@ as normal chat; the prefix characters are invisible.
 | `reward.add` | `RECEIVED_REWARDS` | IN | `reward` -> JSON `SignedResponse<RewardedUserCollectionJsonHelper>`. |
 | `reward.add_delayed` | `RECEIVED_REWARDS_DELAYED` | IN | Same shape as above. The client holds it until something claims it by `(source, sourceId)` (`ClaimDelayedReward`), then echoes it to `PUT /reward/v1`. Party games send it with `source` 5 (`MINI_GAME`) and `sourceId` = the session id, and their end popup claims it. |
 | `reward.room` | `RECEIVED_ROOOM_REWARDS` | IN | `reward` -> JSON `SignedResponse<InRoomRewards>`. (Enum name has the typo `ROOOM` - three O's - verbatim in the client, keep it if this needs to round-trip against real client behavior.) |
-| `reward.levelup` | `PROGRESSION_LEVELUP` | IN | `level` = int + sender session ID. |
+| `reward.levelup` | `PROGRESSION_LEVELUP` | BOTH | OUT: `level` = int, the player's new overall level (sent by ProgressionService when the local player levels up). IN: `level` = int + `senderId`; the server relays it to the rest of the room, which plays the remote level-up particles on that penguin. |
 | `reward.broadcast` | `SEND_EARNED_REWARDS` | OUT | `reward` = JSON `SignedResponse<RewardedUserCollectionJsonHelper>` - client broadcasting its own earned rewards (to the room? to other systems?) rather than receiving them. |
 
 ### Room / igloo / zone
