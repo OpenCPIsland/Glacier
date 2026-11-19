@@ -9,4 +9,5 @@ export function todayUtc(now = new Date()): string {
 export function buildContentIdentifier(clientVersion = config.content.clientVersion, now = new Date()): string {
     const { contentVersion, abTestGroup } = config.content;
     return `${clientVersion};${contentVersion};${todayUtc(now)};${abTestGroup}`;
+//OpenCPIPS     return `1;${contentVersion};2018-09-14;${abTestGroup}`;
 }
