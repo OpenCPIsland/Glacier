@@ -15,6 +15,7 @@ import { rateLimit, clientAddress } from "./utils/rateLimit.ts";
 import * as routes from "./routes/index.ts";
 import { encryptionMiddleware } from "./routes/encryption.ts";
 import { incrementTask as incrementDailyTask } from "./routes/task.ts";
+import { activeTaskIds } from "./services/dailySchedule.ts";
 import { effectiveRole, isStaffAdmin, isStaffRole } from "./utils/staffRoles.ts";
 import { isInternalRequest } from "./utils/internalSecret.ts";
 import { isBanned, activeMute, activeMutes, setMute, liftMute } from "./services/moderation.ts";
@@ -168,6 +169,16 @@ app.post('/api/internal/add-coins', express.json(), (req, res) => {
         console.error('[INTERNAL-API] Error adding coins:', error);
         res.status(500).json({ error: 'Internal error' });
     }
+});
+
+/**
+ * GET /api/internal/daily-task-ids
+ * The game server reads today's daily task list, so it only counts those.
+ * Returns { day, ids }.
+ */
+app.get('/api/internal/daily-task-ids', (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    res.json({ day: db.currentTaskDay(), ids: activeTaskIds() });
 });
 
 app.post('/api/internal/room-collected', express.json(), (req, res) => {

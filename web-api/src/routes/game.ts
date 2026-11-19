@@ -23,7 +23,11 @@ import lots from "../../data/lots.json";
 import { logSafe } from "../utils/logSafe.ts";
 import { buildContentIdentifier, todayUtc } from "../utils/contentIdentifier.ts";
 import { roomCap, populationScaleFor, isMarkedFull } from "../utils/roomCap.ts";
+import { activeTaskIds } from "../services/dailySchedule.ts";
 import { effectiveRole } from "../utils/staffRoles.ts";
+import { todaysProgress } from "./task.ts";
+
+export const DAILY_TASK_IDS_FIELD = "dailyTaskIds";
 
 /** Moderators and admins get into a full room (to moderate a crowd). */
 function isCapExempt(swid) {
@@ -229,6 +233,7 @@ function buildJoinRoomData(swid, username, displayName, sessionId, roomIdentifie
     // Build complete quest collection including available quests
     const mascotXP = playerProgress.mascotXP || {};
     const quests = buildCompleteQuestCollection(username, playerProgress.quests || [], mascotXP);
+    const dailyTaskIds = activeTaskIds();
 
     return {
         swid: swid,
@@ -240,7 +245,8 @@ function buildJoinRoomData(swid, username, displayName, sessionId, roomIdentifie
         playerRoomData: {
             assets: playerProgress.assets,
             consumableInventory: playerProgress.consumableInventory || { inventoryMap: {} },
-            dailyTaskProgress: playerProgress.dailyTaskProgress || [],
+            dailyTaskProgress: todaysProgress(username, playerProgress.dailyTaskProgress || []),            
+            [DAILY_TASK_IDS_FIELD]: dailyTaskIds,
             member: true,
             outfit: { 
                 parts: outfitEquipment,

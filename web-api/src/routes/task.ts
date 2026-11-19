@@ -16,6 +16,7 @@ import * as smartfox from "../smartfoxNotifier.ts";
 import config from "../config.ts";
 import { addXpToInternal } from "../utils/xp.ts";
 import { signedResponse } from "../utils/response.ts";
+import { activeTaskIds } from "../services/dailySchedule.ts";
 import dailyTaskData from "../../../smartfox-server/data/daily-tasks.json" with { type: "json" };
 
 // Task definitions shared with the game server (generated from the game's
@@ -32,9 +33,45 @@ function isTaskComplete(def, counter) {
 // TaskDefinition.TaskGroup 2: one counter shared by every player.
 const GROUP_COMMUNITY = 2;
 
-function currentCounter(username, taskId, def) {
+function storedCounter(username, taskId, def) {
     if (def.group === GROUP_COMMUNITY) return db.getCommunityTaskCounter(taskId);
     return db.getTodaysDailyTask(username, taskId)?.counter ?? 0;
+}
+// "Complete N daily challenges" tasks (TaskCompletion_4/_5) count what is
+// complete on today's list, community tasks included, the way the client's
+// TaskCompletionWatcher.recount does. Counting completion events instead
+// would miss community tasks, which complete for everyone at once.
+const isCompletionTask = (def) => def.watchers.some(w => w.type === 'taskCompletion');
+
+function completedToday(username, def) {
+    let done = 0;
+    for (const id of activeTaskIds()) {
+        const other = DAILY_TASKS[id];
+        if (other && !isCompletionTask(other) && isTaskComplete(other, storedCounter(username, id, other))) done++;
+    }
+    return def.counterMax > 0 ? Math.min(done, def.counterMax) : done;
+}
+
+function currentCounter(username, taskId, def) {
+    return isCompletionTask(def) ? completedToday(username, def) : storedCounter(username, taskId, def);
+}
+
+/**
+ * Today's progress for the client: only listed tasks, with completion
+ * tasks' counters worked out from what's complete.
+ */
+export function todaysProgress(username, progress) {
+    const listed = activeTaskIds();
+    const out = progress.filter(p => listed.includes(p.taskId));
+    for (const id of listed) {
+        const def = DAILY_TASKS[id];
+        if (!def || !isCompletionTask(def)) continue;
+        const counter = completedToday(username, def);
+        const row = out.find(p => p.taskId === id);
+        if (row) row.counter = counter;
+        else if (counter > 0) out.push({ taskId: id, counter, day: db.currentTaskDay(), claimed: false });
+    }
+    return out;
 }
 
 /**
@@ -46,10 +83,12 @@ function currentCounter(username, taskId, def) {
 export function incrementTask(username, taskId, times) {
     const def = DAILY_TASKS[taskId];
     if (!def) return null;
+    if (!activeTaskIds().includes(taskId)) return { counter: 0, changed: false, completed: false };
     const day = db.currentTaskDay();
-    const before = currentCounter(username, taskId, def);
+    const before = storedCounter(username, taskId, def);
     let counter = before;
-    for (let i = 0; i < times; i++) {
+    if (isCompletionTask(def)) counter = completedToday(username, def);
+    else for (let i = 0; i < times; i++) {
         if (def.counterMax === 0 || counter < def.counterMax) counter++;
     }
     if (counter !== before) {
@@ -101,6 +140,10 @@ router.post('/task/v1/reward', (req, res) => {
     
     // Pays the task's own reward, once, and only if the game server counted
     // it complete today.
+  if (!activeTaskIds().includes(taskId)) {
+        console.log(`[TASK] ${username} claim for ${taskId} refused: not in today's list`);
+        return res.json({ reward: {} });
+    }
     const def = DAILY_TASKS[taskId];
     const counter = def ? currentCounter(username, taskId, def) : 0;
     if (!def || !isTaskComplete(def, counter)) {

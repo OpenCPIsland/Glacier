@@ -322,6 +322,27 @@ export interface TaskIncrementResult {
   completed: boolean;
 }
 
+// Today's daily task list (the web API's schedule), so daily-tasks.ts only
+// reports those. Null if it can't be read.
+export async function fetchDailyTaskIds(): Promise<{ day: number; ids: string[] } | null> {
+  try {
+    const res = await fetch(`${WEBAPI_INTERNAL_URL}/api/internal/daily-task-ids`, {
+      headers: internalHeaders(),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) {
+      console.log(`[${new Date().toISOString()}] webapi-client: daily-task-ids failed with status ${res.status}`);
+      return null;
+    }
+    const body = (await res.json()) as { day?: unknown; ids?: unknown };
+    if (typeof body.day !== "number" || !Array.isArray(body.ids)) return null;
+    return { day: body.day, ids: body.ids.filter((id): id is string => typeof id === "string") };
+  } catch (err) {
+    console.log(`[${new Date().toISOString()}] webapi-client: daily-task-ids request failed: ${(err as Error).message}`);
+    return null;
+  }
+}
+
 export async function incrementTask(username: string, taskId: string, times: number): Promise<TaskIncrementResult | null> {
   try {
     const res = await fetch(`${WEBAPI_INTERNAL_URL}/api/internal/task-increment`, {

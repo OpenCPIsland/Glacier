@@ -23,7 +23,7 @@
 
 import data from "../data/daily-tasks.json" with { type: "json" };
 import { SFSObjectWriter, encodePacket, type OutgoingPacket } from "./sfs-wire.ts";
-import { incrementTask } from "./webapi-client.ts";
+import { fetchDailyTaskIds, incrementTask } from "./webapi-client.ts";
 import { getAll, getByRoom } from "./session-registry.ts";
 import type { Session } from "./session.ts";
 import {
@@ -88,9 +88,46 @@ function taskCountPacket(taskId: string, counter: number): OutgoingPacket {
   return encodePacket(1, 13, new SFSObjectWriter().putUtfString("c", "task.c").putSFSObject("p", p));
 }
 
+let fetchIds = fetchDailyTaskIds;
+let listed: { day: number; ids: Set<string>; at: number } | null = null;
+let lastFailedAt = -Infinity;
+const RETRY_MS = 30000;
+// A panel edit to today's list reaches the game server within this long.
+const REFRESH_MS = 5 * 60000;
+
+export function setDailyTaskIdsFetcher(f: typeof fetchDailyTaskIds): void {
+  fetchIds = f;
+  resetDailyTaskIdsCache();
+}
+
+export function resetDailyTaskIdsCache(): void {
+  listed = null;
+  lastFailedAt = -Infinity;
+}
+
+// Whether taskId is on today's list. True when today's list can't be read;
+// a failed refresh keeps the list already read for today.
+export async function isListedToday(taskId: string, now = Date.now()): Promise<boolean> {
+  const day = Math.floor(now / 86400000);
+  const stale = listed?.day !== day || now - listed.at >= REFRESH_MS;
+  if (stale && now - lastFailedAt >= RETRY_MS) {
+    const got = await fetchIds();
+    if (got) {
+      const changed = listed?.day !== day || got.ids.length !== listed.ids.size || got.ids.some((id) => !listed!.ids.has(id));
+      listed = { day, ids: new Set(got.ids), at: now };
+      if (changed) console.log(`[${new Date(now).toISOString()}] daily task list for day ${day}: ${got.ids.join(", ")}`);
+    } else {
+      lastFailedAt = now;
+      console.log(`[${new Date(now).toISOString()}] daily task list unavailable; counting every task until it can be read`);
+    }
+  }
+  return listed?.day === day ? listed.ids.has(taskId) : true;
+}
+
 async function increment(target: Target, taskId: string, times: number): Promise<void> {
   const def = TASKS[taskId];
   if (!def || times <= 0) return;
+  if (!(await isListedToday(taskId))) return;
   await target.session.identityReady;
   const account = target.session.accountName;
   if (!account) return;
