@@ -264,15 +264,26 @@ export async function reportRoomFull(roomName: string): Promise<void> {
   }
 }
 
+// What a player has collected in a room ({ path: time }), for the
+// reward.room answer to a pickup. Null if it can't be read.
 export async function fetchRoomCollected(username: string, room: string): Promise<Record<string, number> | null> {
   try {
     const res = await fetch(`${WEBAPI_INTERNAL_URL}/api/internal/room-collected`, {
-      method: "POST", headers: internalHeaders(), body: JSON.stringify({ username, room }), signal: AbortSignal.timeout(5000),
+      method: "POST",
+      headers: internalHeaders(),
+      body: JSON.stringify({ username, room }),
+      signal: AbortSignal.timeout(5000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.log(`[${new Date().toISOString()}] webapi-client: room-collected failed with status ${res.status}`);
+      return null;
+    }
     const body = (await res.json()) as { collected?: unknown };
     return body.collected && typeof body.collected === "object" ? (body.collected as Record<string, number>) : null;
-  } catch { return null; }
+  } catch (err) {
+    console.log(`[${new Date().toISOString()}] webapi-client: room-collected request failed: ${(err as Error).message}`);
+    return null;
+  }
 }
 
 // At startup: connections from before this process are gone and their close

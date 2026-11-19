@@ -181,12 +181,6 @@ app.get('/api/internal/daily-task-ids', (req, res) => {
     res.json({ day: db.currentTaskDay(), ids: activeTaskIds() });
 });
 
-app.post('/api/internal/room-collected', express.json(), (req, res) => {
-    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
-    const { username, room } = req.body ?? {};
-    if (typeof username !== 'string' || typeof room !== 'string') return res.status(400).json({ error: 'bad body' });
-    res.json({ collected: db.getRoomCollected(username, room) });
-});
 
 /**
  * POST /api/internal/grant-reward
@@ -274,6 +268,19 @@ app.post('/api/internal/room-full', express.json(), (req, res) => {
     markRoomFull(parsed.world, parsed.room, parsed.instanceId, parsed.clientVersion);
     console.log(`[INTERNAL-API] Room ${logSafe(parsed.world)}/${logSafe(parsed.room)} marked full by the game server`);
     res.json({ success: true });
+});
+
+/**
+ * POST /api/internal/room-collected
+ * The game server reads what a player has collected in a room, to send the
+ * whole set back with each pickup (the client replaces its set with it).
+ * Body: { username, room }. Returns { collected: { path: time } }.
+ */
+app.post('/api/internal/room-collected', express.json(), (req, res) => {
+    if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
+    const { username, room } = req.body ?? {};
+    if (typeof username !== 'string' || typeof room !== 'string') return res.status(400).json({ error: 'Missing or invalid username or room' });
+    res.json({ collected: db.getRoomCollected(username, room) });
 });
 
 /**

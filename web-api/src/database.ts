@@ -1936,9 +1936,13 @@ function setRoomCollectedAt(username, room, path, at) {
         ON CONFLICT(username, room, path) DO UPDATE SET collected_at = excluded.collected_at
     `).run(username, room, path, at);
 }
+// Everything this player has collected in a room: { path: collected_at }.
+// The client hides each one until its respawn time (CollectibleController).
 function getRoomCollected(username, room) {
     const out = {};
-    for (const row of db.prepare('SELECT path, collected_at FROM room_collectibles WHERE username = ? AND room = ?').all(username, room)) out[row.path] = row.collected_at;
+    for (const row of db.prepare('SELECT path, collected_at FROM room_collectibles WHERE username = ? AND room = ?').all(username, room)) {
+        out[row.path] = row.collected_at;
+    }
     return out;
 }
 // ========== CLAIMED REWARDS OPERATIONS ==========
