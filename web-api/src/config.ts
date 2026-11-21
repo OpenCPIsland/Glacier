@@ -13,12 +13,13 @@
 
 import questsData from "../data/quests.json";
 import claimableRewardsData from "../data/ClaimableReward.json";
+import scheduledEventDatesData from "../data/ScheduledEventDates.json";
 import dailySpinData from "../data/DailySpin.json";
 import progressionXPData from "../data/ProgressionMascotLevelXP.json";
 import collectibleDefinitionData from "../data/CollectibleDefinition.json";
 import pickupablesData from "../data/pickupables.json";
 
-console.log(`[CONFIG] Loaded quests.json, ClaimableReward.json, DailySpin.json, ProgressionMascotLevelXP.json, CollectibleDefinition.json, pickupables.json`);
+console.log(`[CONFIG] Loaded quests.json, ClaimableReward.json, ScheduledEventDates.json, DailySpin.json, ProgressionMascotLevelXP.json, CollectibleDefinition.json, pickupables.json`);
 
 // Build collectible exchange rates map from reference data
 const collectibleExchangeRates: Record<string, number> = {};
@@ -53,6 +54,22 @@ for (const mascot of ['AuntArctic', 'Rockhopper', 'Rookie', 'DJCadence']) {
 
 console.log(`[CONFIG] Loaded ${Object.keys(questsData).length} quest definitions`);
 console.log(`[CONFIG] Loaded ${claimableRewardsData.length} claimable reward definitions`);
+
+// ScheduledEventDates.json: DateDefinitionKey id -> window in epoch ms.
+// Each ClaimableReward.json entry points at one through DateDefinitionKey.Id.
+const scheduledEventDates: Record<number, { start: number; end: number }> = {};
+for (const e of scheduledEventDatesData as any[]) {
+    scheduledEventDates[e.Id] = {
+        start: Number(e.Dates?.StartDate?.TimeStampInMilliseconds) || 0,
+        end: Number(e.Dates?.EndDate?.TimeStampInMilliseconds) || 0
+    };
+}
+// ClaimableReward.json: reward Id (the id the client claims with) -> definition.
+const claimableRewardsById: Record<number, any> = {};
+for (const r of claimableRewardsData as any[]) {
+    claimableRewardsById[r.Id] = r;
+}
+console.log(`[CONFIG] Loaded ${Object.keys(scheduledEventDates).length} scheduled event date definitions`);
 console.log(`[CONFIG] Mascot XP thresholds: ${Object.keys(mascotXPThresholds).join(', ')}`)
 
 // Ports reach the client as JSON numbers (JoinRoomData.tcpPort is an int;
@@ -90,7 +107,7 @@ const config = {
     },
 
     // Session file path for SFS2X integration
-    sessionFile: process.env.SESSION_FILE || '../data/sessions.json',
+    sessionFile: process.env.SESSION_FILE || './data/sessions.json',
 
     // Database settings
     database: {
@@ -99,9 +116,10 @@ const config = {
     },
 
     // Content identifiers
+    //should be changed to actual content info
     content: {
         clientVersion: '1.13.0',
-        contentVersion: 'b8d27e191abcbd47534075111f6cb5dcd9aa56f7',
+        contentVersion: 'live',
         abTestGroup: 'NONE'
     },
 
@@ -182,6 +200,11 @@ const config = {
 
     // Claimable rewards - loaded from ClaimableReward.json
     claimableRewards: claimableRewardsData as any[],
+    claimableRewardsById,
+
+    // Event windows used by the claimable rewards - loaded from ScheduledEventDates.json
+    // (see isEventActive in utils/eventDates.ts)
+    scheduledEventDates,
 
     // Daily spin configuration - loaded from DailySpin.json
     dailySpinConfig: (dailySpinData as any[]).length > 0 ? (dailySpinData as any[])[0] : null,
@@ -196,8 +219,8 @@ const config = {
             { id: 3, type: 'mascotXP', mascot: 'DJCadence', xp: 20, weight: 25 },
             { id: 4, type: 'mascotXP', mascot: 'Rockhopper', xp: 20, weight: 25 },
             { id: 5, type: 'mascotXP', mascot: 'Rookie', xp: 20, weight: 25 },
-            { id: 6, type: 'coins', coins: 100, weight: 25 },
-            { id: 7, type: 'coins', coins: 25, weight: 25 }
+            { id: 6, type: 'coins', coins: 463278, weight: 25 },
+            { id: 7, type: 'coins', coins: 463278, weight: 25 }
         ],
         chestDefinitions: [
             { id: 0, name: 'Bronze', numPunchesPerChest: 3, coins: 200 },
