@@ -75,7 +75,7 @@ const config = {
 
     // Game server connection settings (SFS2X)
     gameServer: {
-        ip: process.env.GAME_SERVER_IP || 'cpfsa.opencpisland.com',
+        ip: process.env.GAME_SERVER_IP || '127.0.0.1',
         tcpPort: portFromEnv('GAME_SERVER_PORT', 9933),
         httpsPort: 8443
     },
@@ -90,7 +90,7 @@ const config = {
     },
 
     // Session file path for SFS2X integration
-    sessionFile: process.env.SESSION_FILE || './data/sessions.json',
+    sessionFile: process.env.SESSION_FILE || '../data/sessions.json',
 
     // Database settings
     database: {
@@ -196,8 +196,8 @@ const config = {
             { id: 3, type: 'mascotXP', mascot: 'DJCadence', xp: 20, weight: 25 },
             { id: 4, type: 'mascotXP', mascot: 'Rockhopper', xp: 20, weight: 25 },
             { id: 5, type: 'mascotXP', mascot: 'Rookie', xp: 20, weight: 25 },
-            { id: 6, type: 'coins', coins: 463278, weight: 25 },
-            { id: 7, type: 'coins', coins: 463278, weight: 25 }
+            { id: 6, type: 'coins', coins: 100, weight: 25 },
+            { id: 7, type: 'coins', coins: 25, weight: 25 }
         ],
         chestDefinitions: [
             { id: 0, name: 'Bronze', numPunchesPerChest: 3, coins: 200 },
