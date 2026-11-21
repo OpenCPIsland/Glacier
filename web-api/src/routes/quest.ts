@@ -169,9 +169,10 @@ router.post('/quest/v1/progress', (req, res) => {
         objectives = req.body;
     }
     const definedObjectives = config.questDefinitions[activeQuest.questId]?.objectives ?? {};
-    objectives = (Array.isArray(objectives) ? objectives : [])
-        .slice(0, 100)
-        .filter((o) => typeof o === 'string' && Object.hasOwn(definedObjectives, o));
+   objectives = (Array.isArray(objectives) ? objectives : [])
+    .slice(0, 100)
+    .map((o) => (typeof o === 'string' ? o.trim() : o))
+    .filter((o) => typeof o === 'string' && Object.hasOwn(definedObjectives, o));
     
     console.log(`[QUEST] Objectives received: ${JSON.stringify(objectives)}`);
     
@@ -340,7 +341,8 @@ router.post('/quest/v1/:questId', (req, res) => {
         // The completion reward needs a quest we know, completed for the
         // first time, with every objective it defines recorded.
         const questDef = Object.hasOwn(config.questDefinitions, questId) ? config.questDefinitions[questId] : null;
-        const missing = questDef ? Object.keys(questDef.objectives || {}).filter((o) => !quest.completedObjectives.includes(o)) : [];
+        const done = (quest.completedObjectives || []).map((s) => String(s).trim());
+        const missing = questDef ? Object.keys(questDef.objectives || {}).filter((o) => !done.includes(o.trim())) : [];
         if (wasFirstCompletion && (!questDef || missing.length > 0)) {
             console.log(`[QUEST] ${username} completed ${logSafe(questId)} without ${questDef ? `objectives ${logSafe(missing.join(','))}` : 'a quest definition'}: no completion reward`);
         }
