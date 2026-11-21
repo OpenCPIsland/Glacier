@@ -219,8 +219,8 @@ const config = {
             { id: 3, type: 'mascotXP', mascot: 'DJCadence', xp: 20, weight: 25 },
             { id: 4, type: 'mascotXP', mascot: 'Rockhopper', xp: 20, weight: 25 },
             { id: 5, type: 'mascotXP', mascot: 'Rookie', xp: 20, weight: 25 },
-            { id: 6, type: 'coins', coins: 463278, weight: 25 },
-            { id: 7, type: 'coins', coins: 463278, weight: 25 }
+            { id: 6, type: 'coins', coins: 100, weight: 25 },
+            { id: 7, type: 'coins', coins: 25, weight: 25 }
         ],
         chestDefinitions: [
             { id: 0, name: 'Bronze', numPunchesPerChest: 3, coins: 200 },
