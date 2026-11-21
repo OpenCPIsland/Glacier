@@ -48,6 +48,36 @@ const PRIZE_COINS = {
     'Venus Fly Trap': 45,
 };
 
+// Mascot XP each prize pays, per mascot: prize id -> { mascot name: xp }.
+// Mascot names are the MascotDefinition names used by quests.json and the
+// mascot_xp table: AuntArctic, DJCadence, Rockhopper, Rookie.
+// The values come from each prize's Reward asset (MascotXP list: Mascot + XP).
+//
+// PLACEHOLDER: only 'Anchor' is confirmed from its asset (Rockhopper, 10 XP).
+// Every other entry is a placeholder of 0 XP, which awards nothing. Replace
+// the mascot and amount with the real values from each prize's Reward asset.
+// A prize can list several mascots, or {} for none.
+const PRIZE_MASCOT_XP: Record<string, Record<string, number>> = {
+    'Seaweed':        { Rookie: 2 },
+    'Small Fish 1':   { AuntArctic: 3 },
+    'Small Fish 2':   { Rockhopper: 3 },
+    'Cactus':         { Rookie: 3 },
+    'Clam':           { AuntArctic: 3 },
+    'Medium Fish 1':  { Rockhopper: 5 },
+    'Medium Fish 2':  { Rockhopper: 7 },
+    'Medium Fish 3':  { Rookie: 5 },
+    'Medium Fish 4':  { AuntArctic: 4 },
+    'Medium Fish 5':  { Rookie: 4 }, 
+    'Medium Fish 6':  { Rockhopper: 5 },
+    'Medium Fish 7':  { AuntArctic: 5 },
+    'Medium Fish 8':  { Rookie: 3 },
+    'Large Fish 1':   { AuntArctic: 5 },
+    'Large Fish 2':   { Rookie: 5 }, 
+    'Squid':          { AuntArctic: 10 }, // TODO
+    'Anchor':         { Rockhopper: 10 },
+    'Venus Fly Trap': { Rookie: 10 }, // TODO
+};
+
 // The client (FishingController.onFishingResultReceived) reads the prize map
 // with the fixed keys "Common", "Rare" and "Legendary" and needs all three.
 // Each pool holds the prize names that rarity can offer. The values MUST be
@@ -165,15 +195,30 @@ router.post('/minigame/v1/fishing/catch', (req, res) => {
     if (cast) lastCast.delete(username);
     const coinReward = offered && Object.hasOwn(PRIZE_COINS, winningRewardName) ? PRIZE_COINS[winningRewardName] : 0;
 
-    // Add coins to player
+    // Mascot XP for this prize, keeping only mascots with a positive amount.
+    // Placeholder entries of 0 are dropped here, so they award nothing.
+    const prizeMascotXp = offered && Object.hasOwn(PRIZE_MASCOT_XP, winningRewardName)
+        ? PRIZE_MASCOT_XP[winningRewardName]
+        : {};
+    const mascotXp: Record<string, number> = {};
+    for (const [mascot, xp] of Object.entries(prizeMascotXp)) {
+        if (xp > 0) mascotXp[mascot] = xp;
+    }
+
+    // Save the rewards to the player
     if (coinReward > 0) db.addPlayerCoins(username, coinReward);
+    for (const [mascot, xp] of Object.entries(mascotXp)) {
+        db.addMascotXP(username, mascot, xp);
+    }
 
     // Build reward structure. The client parses each reward map key with
     // long.Parse, so the key must be the player's numeric session ID (the one
     // SFS2X uses), not the swid. With no saved session send an empty map:
-    // the client then shows nothing, but the coins above are still saved.
+    // the client then shows nothing, but the coins and XP above are still saved.
+    // mascotXP uses the same shape as quest rewards: { mascotName: xp }.
     const reward = {
-        coins: coinReward
+        coins: coinReward,
+        ...(Object.keys(mascotXp).length > 0 && { mascotXP: mascotXp }),
     };
     const sessionId = getSessionIdForUser(username);
     const rewardMap = sessionId !== null ? { [String(sessionId)]: reward } : {};
