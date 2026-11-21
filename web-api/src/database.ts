@@ -173,6 +173,36 @@ function initializeDatabase() {
         )
     `);
 
+    // Music tracks, decoration purchase rights and structure purchase rights
+    // owned (granted by claimable rewards)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS owned_music_tracks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            track_id INTEGER NOT NULL,
+            UNIQUE(username, track_id),
+            FOREIGN KEY (username) REFERENCES players(username) ON DELETE CASCADE
+        )
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS owned_decoration_purchase_rights (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            right_id INTEGER NOT NULL,
+            UNIQUE(username, right_id),
+            FOREIGN KEY (username) REFERENCES players(username) ON DELETE CASCADE
+        )
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS owned_structure_purchase_rights (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            right_id INTEGER NOT NULL,
+            UNIQUE(username, right_id),
+            FOREIGN KEY (username) REFERENCES players(username) ON DELETE CASCADE
+        )
+    `);
+
     // Collectible currencies
     db.exec(`
         CREATE TABLE IF NOT EXISTS collectible_currencies (
@@ -1386,6 +1416,9 @@ function getPlayerAssets(username) {
     const equipmentTemplates = db.prepare('SELECT template_id FROM owned_equipment_templates WHERE username = ?').all(username).map(r => r.template_id);
     const durables = db.prepare('SELECT durable_id FROM owned_durables WHERE username = ?').all(username).map(r => r.durable_id);
     const tubes = db.prepare('SELECT tube_id FROM owned_tubes WHERE username = ?').all(username).map(r => r.tube_id);
+    const musicTracks = db.prepare('SELECT track_id FROM owned_music_tracks WHERE username = ?').all(username).map(r => r.track_id);
+    const decorationPurchaseRights = db.prepare('SELECT right_id FROM owned_decoration_purchase_rights WHERE username = ?').all(username).map(r => r.right_id);
+    const structurePurchaseRights = db.prepare('SELECT right_id FROM owned_structure_purchase_rights WHERE username = ?').all(username).map(r => r.right_id);
 
     return {
         coins: assetsRow?.coins || 1000,
@@ -1398,9 +1431,9 @@ function getPlayerAssets(username) {
         sizzleClips: sizzleClips,
         equipmentTemplates: equipmentTemplates,
         lots: [],
-        decorations: [],
-        structures: [],
-        musicTracks: [],
+        decorations: decorationPurchaseRights,
+        structures: structurePurchaseRights,
+        musicTracks: musicTracks,
         lighting: [],
         durables: durables,
         partySupplies: [],
@@ -1510,6 +1543,21 @@ function addSizzleClip(username, sizzleClipId) {
 function addTube(username, tubeId) {
     getOrCreatePlayer(username);
     db.prepare('INSERT OR IGNORE INTO owned_tubes (username, tube_id) VALUES (?, ?)').run(username, tubeId);
+}
+
+function addMusicTrack(username, trackId) {
+    getOrCreatePlayer(username);
+    db.prepare('INSERT OR IGNORE INTO owned_music_tracks (username, track_id) VALUES (?, ?)').run(username, trackId);
+}
+
+function addDecorationPurchaseRight(username, rightId) {
+    getOrCreatePlayer(username);
+    db.prepare('INSERT OR IGNORE INTO owned_decoration_purchase_rights (username, right_id) VALUES (?, ?)').run(username, rightId);
+}
+
+function addStructurePurchaseRight(username, rightId) {
+    getOrCreatePlayer(username);
+    db.prepare('INSERT OR IGNORE INTO owned_structure_purchase_rights (username, right_id) VALUES (?, ?)').run(username, rightId);
 }
 
 function setEquippedTube(username, tubeId) {
@@ -3079,6 +3127,9 @@ export {
     addFabric,
     addSizzleClip,
     addTube,
+    addMusicTrack,
+    addDecorationPurchaseRight,
+    addStructurePurchaseRight,
     setEquippedTube,
     getEquippedTube,
     addCollectibleCurrency,
