@@ -75,7 +75,7 @@ const config = {
 
     // Game server connection settings (SFS2X)
     gameServer: {
-        ip: process.env.GAME_SERVER_IP || '127.0.0.1',
+        ip: process.env.GAME_SERVER_IP || 'cpfsa.opencpisland.com',
         tcpPort: portFromEnv('GAME_SERVER_PORT', 9933),
         httpsPort: 8443
     },
@@ -90,7 +90,7 @@ const config = {
     },
 
     // Session file path for SFS2X integration
-    sessionFile: process.env.SESSION_FILE || '',
+    sessionFile: process.env.SESSION_FILE || './data/sessions.json',
 
     // Database settings
     database: {
@@ -99,17 +99,16 @@ const config = {
     },
 
     // Content identifiers
-    // live should be replaced by whatever the current content manifest is, depending on the CPI release
     content: {
         clientVersion: '1.13.0',
-        contentVersion: 'live',
+        contentVersion: 'b8d27e191abcbd47534075111f6cb5dcd9aa56f7',
         abTestGroup: 'NONE'
     },
 
     // Default player values
     defaults: {
         startingCoins: 1000,
-        profileColour: 23,
+        profileColour: 3235500,
         daysOld: 1,
         defaultDurable: 15
     },
@@ -197,8 +196,8 @@ const config = {
             { id: 3, type: 'mascotXP', mascot: 'DJCadence', xp: 20, weight: 25 },
             { id: 4, type: 'mascotXP', mascot: 'Rockhopper', xp: 20, weight: 25 },
             { id: 5, type: 'mascotXP', mascot: 'Rookie', xp: 20, weight: 25 },
-            { id: 6, type: 'coins', coins: 25, weight: 25 },
-            { id: 7, type: 'coins', coins: 100, weight: 25 }
+            { id: 6, type: 'coins', coins: 463278, weight: 25 },
+            { id: 7, type: 'coins', coins: 463278, weight: 25 }
         ],
         chestDefinitions: [
             { id: 0, name: 'Bronze', numPunchesPerChest: 3, coins: 200 },
@@ -224,7 +223,9 @@ for (const [questId, questData] of Object.entries(questsData as Record<string, a
         isMemberOnly: questData.isMemberOnly || false,
         levelRequirement: questData.preReqProgressLevel || 0,
         prerequisites: questData.preReqQuests || [],
-        objectives: questData.objectives || {},
+        objectives: Object.fromEntries(
+    Object.entries(questData.objectives || {}).map(([k, v]) => [k.trim(), v])
+),
         completeReward: questData.completeReward || null,
         startReward: questData.startReward || null,
         timeLockedSeconds: questData.timeLockedSeconds || 0
