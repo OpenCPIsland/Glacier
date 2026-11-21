@@ -123,7 +123,8 @@ console.log('[REWARD] ct=', req.headers['content-type'], 'len=', req.headers['co
     for (const rewardPath of Object.keys(collected).slice(0, MAX_ROOM_PICKUPS)) {
         if (!Object.hasOwn(roomPickupables, rewardPath)) continue;
         const pickupable = roomPickupables[rewardPath];
-        const respawn = config.collectibleRespawn[pickupable.tag] ?? { seconds: 0, daily: true };
+         const collectibleType = Object.keys(pickupable.reward?.collectibleCurrency || {})[0];
+        const respawn = (collectibleType && config.collectibleRespawn[collectibleType]) || { seconds: 0, daily: true };        
         const last = db.getRoomCollectedAt(username, room, rewardPath);
         if (last !== null) {
             const ready = respawn.daily
