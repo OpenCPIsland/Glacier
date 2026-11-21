@@ -891,13 +891,25 @@ function setClaimedWelcomeKit(username, claimed) {
 }
 
 /**
+ * The profile's daysOld: whole days since the player row was created
+ * (created_at is SQLite CURRENT_TIMESTAMP, UTC), with the first day counting
+ * as 1 like the default. profile_days_old only stayed at its starting value,
+ * so it is the fallback when created_at can't be read.
+ */
+function accountDaysOld(player) {
+    const created = Date.parse(`${String(player.created_at).replace(' ', 'T')}Z`);
+    if (!Number.isFinite(created)) return player.profile_days_old;
+    return Math.max(1, Math.floor((Date.now() - created) / 86400000) + 1);
+}
+
+/**
  * Get full player profile
  */
 function getPlayerProfile(username) {
     const player = getOrCreatePlayer(username);
     return {
         colour: player.profile_colour,
-        daysOld: player.profile_days_old
+        daysOld: accountDaysOld(player)
     };
 }
 
@@ -3009,7 +3021,7 @@ function getFullPlayerData(username) {
         outfit: { parts: getOutfit(username) },
         profile: {
             colour: player.profile_colour,
-            daysOld: player.profile_days_old
+            daysOld: accountDaysOld(player)
         },
         mascotXP: getMascotXP(username),
         assets: getPlayerAssets(username),
