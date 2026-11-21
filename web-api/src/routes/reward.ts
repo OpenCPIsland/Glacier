@@ -22,6 +22,7 @@ import * as db from "../database.ts";
 import config from "../config.ts";
 import { addXpToInternal, getMascotFromQuestId } from "../utils/xp.ts";
 import { generateEquipmentId } from "../utils/session.ts";
+import { isEventActive } from "../utils/eventDates.ts";
 
 // ========== HELPER FUNCTIONS ==========
 
@@ -122,8 +123,7 @@ console.log('[REWARD] ct=', req.headers['content-type'], 'len=', req.headers['co
     for (const rewardPath of Object.keys(collected).slice(0, MAX_ROOM_PICKUPS)) {
         if (!Object.hasOwn(roomPickupables, rewardPath)) continue;
         const pickupable = roomPickupables[rewardPath];
-        const collectibleType = Object.keys(pickupable.reward?.collectibleCurrency || {})[0];
-        const respawn = (collectibleType && config.collectibleRespawn[collectibleType]) || { seconds: 0, daily: true };
+        const respawn = config.collectibleRespawn[pickupable.tag] ?? { seconds: 0, daily: true };
         const last = db.getRoomCollectedAt(username, room, rewardPath);
         if (last !== null) {
             const ready = respawn.daily
@@ -186,6 +186,29 @@ function claimRewardHandler(req, res) {
         return res.status(410).json({ error: 'Reward already claimed' });
     }
     
+    // ClaimableReward.json is the source of truth; ids it doesn't define fall
+    // through to config.rewardDefinitions below.
+    const claimable = config.claimableRewardsById[rewardId];
+    if (claimable) {
+        const isMember = true; // All players are members in this private server
+        if (claimable.IsMemberOnly && !isMember) {
+            console.log(`[REWARD] ${username} tried to claim member-only reward ${rewardId}`);
+            return res.status(403).json({ error: 'Reward is for members only' });
+        }
+        // The window comes from ScheduledEventDates.json via DateDefinitionKey.
+        if (!isEventActive(claimable.DateDefinitionKey?.Id)) {
+            console.log(`[REWARD] ${username} tried to claim reward ${rewardId} outside its event dates (key ${claimable.DateDefinitionKey?.Id})`);
+            return res.status(403).json({ error: 'Reward is not available' });
+        }
+
+        const reward = grantClaimableReward(username, claimable.Reward);
+        db.addClaimedReward(username, rewardId);
+        console.log(`[REWARD] ${username} claimed reward ${rewardId}`);
+
+        // Response: ClaimRewardResponse
+        return res.json({ reward });
+    }
+
     // Get reward definition
     const rewardDef = config.rewardDefinitions[rewardId];
     
@@ -260,6 +283,57 @@ function claimRewardHandler(req, res) {
     
     // Response: ClaimRewardResponse
     res.json({ reward });
+}
+
+// Reward fields granted through database.ts helpers of these names. A helper
+// that doesn't exist yet is logged and skipped, so the rest of the reward
+// still pays.
+const OPTIONAL_REWARD_GRANTS = {
+    musicTracks: 'addMusicTrack',
+    decorationPurchaseRights: 'addDecorationPurchaseRight',
+    structurePurchaseRights: 'addStructurePurchaseRight'
+};
+
+/**
+ * Grant a ClaimableReward.json reward and return it as the client shows it.
+ */
+function grantClaimableReward(username, definition) {
+    // Clothing the player already owns isn't handed out again; overlapping
+    // packs (Holiday 2017 and Holiday 2026) would otherwise add a second copy.
+    const owned = new Set(db.getEquipment(username).map(e => e.definitionId));
+    const reward = {
+        ...definition,
+        equipmentInstances: (definition.equipmentInstances || []).filter(i => !owned.has(i.definitionId))
+    };
+    const granted = applyRewards(username, reward);
+
+    // A template also gets one instance of the item, as the legacy claim did.
+    for (const templateId of definition.equipmentTemplates || []) {
+        if (!db.getEquipment(username).some(e => e.definitionId === templateId)) {
+            db.saveEquipment(username, {
+                equipmentId: generateEquipmentId(),
+                dateTimeCreated: Date.now(),
+                definitionId: templateId,
+                parts: []
+            });
+        }
+    }
+
+    for (const [type, quantity] of Object.entries(definition.consumables || {})) {
+        db.addConsumable(username, type, quantity);
+    }
+
+    for (const [field, helper] of Object.entries(OPTIONAL_REWARD_GRANTS)) {
+        const ids = definition[field];
+        if (!Array.isArray(ids) || ids.length === 0) continue;
+        if (typeof db[helper] !== 'function') {
+            console.warn(`[REWARD] ${field} not granted: db.${helper} does not exist`);
+            continue;
+        }
+        ids.forEach(id => db[helper](username, id));
+    }
+
+    return granted;
 }
 
 /**
