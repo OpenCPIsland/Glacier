@@ -3,8 +3,7 @@
 A from-scratch server recreation of **Club Penguin Island** (Disney, shut
 down in 2018), for preservation. The goal is full online play: multiplayer with a server that is authoritative over the game state.
 
-This is a fan project. It is not affiliated with or endorsed by Disney,
-and it does not include any game client or game assets.
+This is a fan project, and it is not affiliated with or endorsed by Disney.
 
 ## What's here
 
