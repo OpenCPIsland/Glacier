@@ -73,9 +73,9 @@ const PRIZE_MASCOT_XP: Record<string, Record<string, number>> = {
     'Medium Fish 8':  { Rookie: 3 },
     'Large Fish 1':   { AuntArctic: 5 },
     'Large Fish 2':   { Rookie: 5 }, 
-    'Squid':          { AuntArctic: 10 }, // TODO
+    'Squid':          { AuntArctic: 10 },
     'Anchor':         { Rockhopper: 10 },
-    'Venus Fly Trap': { Rookie: 10 }, // TODO
+    'Venus Fly Trap': { Rookie: 10 }
 };
 
 // The client (FishingController.onFishingResultReceived) reads the prize map
