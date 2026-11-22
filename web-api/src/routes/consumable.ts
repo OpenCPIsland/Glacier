@@ -12,6 +12,7 @@
 
 import express from "express";
 import { consumableCost } from "../utils/prices.ts";
+import { countConsumablePurchase } from "./task.ts";
 const router = express.Router();
 import * as db from "../database.ts";
 import { signConsumable, checkConsumable, claimConsumable, claimsFrom } from "../utils/consumableSignature.ts";
@@ -126,7 +127,7 @@ function purchaseConsumable(req, res) {
     db.addConsumable(username, type, count);
     
     console.log(`[CONSUMABLE] ${username} spent ${totalCost} coins on ${count}x ${type}`);
-    
+    countConsumablePurchase(username, type);
     const inventory = db.getConsumableInventory(username);
     
     // Response: PurchaseConsumableResponse
