@@ -15,36 +15,39 @@ import config from "../config.ts";
  * @param {number} currentInternalXp - Current internal XP value
  * @returns {number} New internal XP value
  */
+const UNIT = 1_000_000;
+const DEFAULT_THRESHOLDS = [0, 100, 200, 300, 400, 500, 600, 700, 800, 900];
+
 export function addXpToInternal(mascot: string, rawXpToAdd: number, currentInternalXp: number): number {
-    const thresholds = config.mascotXPThresholds[mascot] || [0, 100, 200, 300, 400, 500, 600, 700, 800, 900];
-    const currentLevel = Math.floor(currentInternalXp / 1000000);
+    const thresholds: number[] = config.mascotXPThresholds[mascot] || DEFAULT_THRESHOLDS;
+    let internal = currentInternalXp;
+    let remaining = rawXpToAdd;
 
-    // Get XP thresholds for current and next level
-    const currentThreshold = thresholds[currentLevel] || 0;
-    const nextThreshold = thresholds[currentLevel + 1] || (currentThreshold + 100);
+    for (let guard = 0; remaining > 0 && guard < 100; guard++) {
+        const level = Math.floor(internal / UNIT);
+        const current = thresholds[level] || 0;
+        const next = thresholds[level + 1] || (current + 100);
+        const range = next - current;
 
-    // If at max level, don't add more XP
-    if (currentThreshold >= nextThreshold) {
-        return currentInternalXp;
-    }
+        if (range <= 0) {
+            // Bad/duplicate threshold: skip the level unless it's really the last one
+            if (level + 1 < thresholds.length - 1) {
+                internal = (level + 1) * UNIT;
+                continue;
+            }
+            return internal; // max level
+        }
 
-    // Convert raw XP to internal format
-    const xpRange = nextThreshold - currentThreshold;
-    const internalXpToAdd = Math.floor((rawXpToAdd * 1000000) / xpRange);
-    let newInternalXp = currentInternalXp + internalXpToAdd;
-
-    // Handle level-up overflow recursively
-    if (Math.floor(newInternalXp / 1000000) > currentLevel) {
-        const xpUsedForLevelUp = 1000000 - (currentInternalXp % 1000000);
-        const rawXpUsed = Math.floor((xpUsedForLevelUp * xpRange) / 1000000);
-        const remainingRawXp = rawXpToAdd - rawXpUsed;
-        newInternalXp = (currentLevel + 1) * 1000000;
-        if (remainingRawXp > 0) {
-            return addXpToInternal(mascot, remainingRawXp, newInternalXp);
+        const rawToNextLevel = (((level + 1) * UNIT - internal) * range) / UNIT;
+        if (remaining >= rawToNextLevel) {
+            internal = (level + 1) * UNIT;          // land exactly on the boundary
+            remaining -= rawToNextLevel;
+        } else {
+            internal += Math.ceil((remaining * UNIT) / range);  // ceil, not floor
+            remaining = 0;
         }
     }
-
-    return newInternalXp;
+    return internal;
 }
 
 /**
