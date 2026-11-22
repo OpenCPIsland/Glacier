@@ -102,6 +102,19 @@ export function incrementTask(username, taskId, times) {
     };
 }
 
+export function countConsumablePurchase(username: string, consumableType?: string) {
+    for (const id of activeTaskIds()) {
+        const def = DAILY_TASKS[id];
+        if (!def) continue;
+        for (const w of def.watchers) {
+            if (w.type !== 'consumablePurchase') continue;
+            if (w.consumables?.length && !w.consumables.includes(consumableType)) continue;
+            const r = incrementTask(username, id, 1);
+            console.log(`[TASK] ${username} purchase of ${consumableType} counted for ${id} (counter=${r?.counter})`);
+        }
+    }
+}
+
 /**
  * POST /task/v1
  * Set task progress
