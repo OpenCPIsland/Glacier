@@ -1,6 +1,6 @@
 # Glacier
 
-A from-scratch server recreation of **Club Penguin Island** (Disney, shut
+A from-scratch server recreation for **Club Penguin Island** (Disney, shut
 down in 2018), for preservation. The goal is full online play: multiplayer with a server that is authoritative over the game state.
 
 This is a fan project, and it is not affiliated with or endorsed by Disney.
