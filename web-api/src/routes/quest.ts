@@ -16,10 +16,6 @@ import { signedResponse, buildQuestStateCollection, QuestStatus } from "../utils
 import { getMascotFromQuestId, addXpToInternal } from "../utils/xp.ts";
 import { logSafe } from "../utils/logSafe.ts";
 
-// Objective names match ignoring leading/trailing spaces (quests.json has "Obj2FSM ").
-const hasObjective = (list, name) =>
-    (list || []).some((x) => String(x).trim() === String(name).trim());
-
 /**
  * Helper to grant various rewards from quest definitions
  * Returns the object that was actually granted (with generated IDs)
@@ -175,7 +171,6 @@ router.post('/quest/v1/progress', (req, res) => {
     const definedObjectives = config.questDefinitions[activeQuest.questId]?.objectives ?? {};
     objectives = (Array.isArray(objectives) ? objectives : [])
         .slice(0, 100)
-        .map((o) => (typeof o === 'string' ? o.trim() : o))
         .filter((o) => typeof o === 'string' && Object.hasOwn(definedObjectives, o));
     
     console.log(`[QUEST] Objectives received: ${JSON.stringify(objectives)}`);
@@ -185,7 +180,7 @@ router.post('/quest/v1/progress', (req, res) => {
     let recoveryObjectives = [];
     
     for (const obj of objectives) {
-        if (!hasObjective(activeQuest.completedObjectives, obj)) {
+        if (!activeQuest.completedObjectives.includes(obj)) {
             db.addQuestObjective(username, activeQuest.questId, obj);
             newObjectives.push(obj);
         } else {
@@ -345,7 +340,7 @@ router.post('/quest/v1/:questId', (req, res) => {
         // The completion reward needs a quest we know, completed for the
         // first time, with every objective it defines recorded.
         const questDef = Object.hasOwn(config.questDefinitions, questId) ? config.questDefinitions[questId] : null;
-        const missing = questDef ? Object.keys(questDef.objectives || {}).filter((o) => !hasObjective(quest.completedObjectives, o)) : [];
+        const missing = questDef ? Object.keys(questDef.objectives || {}).filter((o) => !quest.completedObjectives.includes(o)) : [];
         if (wasFirstCompletion && (!questDef || missing.length > 0)) {
             console.log(`[QUEST] ${username} completed ${logSafe(questId)} without ${questDef ? `objectives ${logSafe(missing.join(','))}` : 'a quest definition'}: no completion reward`);
         }
@@ -397,14 +392,13 @@ router.post('/quest/v1/:questId', (req, res) => {
  * reward, or null if there's nothing to grant.
  */
 function grantQuestObjectiveReward(username, objectiveId) {
-    objectiveId = String(objectiveId).trim();
     const quests = db.getQuests(username);
 
     // The client flips quests between ACTIVE and SUSPENDED constantly
     // mid-quest (SUSPENDED only means "not the tracked quest"), so both
     // count. Prefer ACTIVE if both match.
     const candidates = quests
-        .filter(q => (q.status === QuestStatus.ACTIVE || q.status === QuestStatus.SUSPENDED) && !hasObjective(q.completedObjectives, objectiveId))
+        .filter(q => (q.status === QuestStatus.ACTIVE || q.status === QuestStatus.SUSPENDED) && !q.completedObjectives.includes(objectiveId))
         .filter(q => config.questDefinitions[q.questId]?.objectives?.[objectiveId])
         .sort((a, b) => (a.status === QuestStatus.ACTIVE ? -1 : 0) - (b.status === QuestStatus.ACTIVE ? -1 : 0));
 
