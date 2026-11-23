@@ -246,9 +246,7 @@ for (const [questId, questData] of Object.entries(questsData as Record<string, a
         isMemberOnly: questData.isMemberOnly || false,
         levelRequirement: questData.preReqProgressLevel || 0,
         prerequisites: questData.preReqQuests || [],
-        objectives: Object.fromEntries(
-    Object.entries(questData.objectives || {}).map(([k, v]) => [k.trim(), v])
-),
+        objectives: questData.objectives || {},
         completeReward: questData.completeReward || null,
         startReward: questData.startReward || null,
         timeLockedSeconds: questData.timeLockedSeconds || 0
@@ -262,3 +260,4 @@ for (const [questId, questData] of Object.entries(questsData as Record<string, a
 }
 
 export default config;
+
