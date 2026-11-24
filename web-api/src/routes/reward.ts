@@ -103,6 +103,16 @@ const MAX_ROOM_PICKUPS = 200;
 // Slack for the client's clock running ahead of ours.
 const RESPAWN_SLACK_MS = 5000;
 
+function respawnReady(room, path, last, now) {
+    const pickupable = config.pickupables[room]?.[path];
+    if (!pickupable) return true;
+    const type = Object.keys(pickupable.reward?.collectibleCurrency || {})[0];
+    const respawn = (type && config.collectibleRespawn[type]) || { seconds: 0, daily: true };
+    return respawn.daily
+        ? db.currentTaskDay(now) > db.currentTaskDay(last)
+        : now - last >= respawn.seconds * 1000 - RESPAWN_SLACK_MS;
+}
+
 router.post('/reward/v1/room', (req, res) => {
 console.log('[REWARD] ct=', req.headers['content-type'], 'len=', req.headers['content-length'], 'enc=', req.headers['content-encoding'], 'body=', JSON.stringify(req.body)?.slice(0, 600));
     const { username } = req.player;
@@ -773,4 +783,4 @@ router.get('/reward/v1/calculateexchangeall', (req, res) => {
 
 // applyRewards is also used by server.ts's /api/internal/grant-reward.
 export default router;
-export { applyRewards };
+export { applyRewards, respawnReady };
