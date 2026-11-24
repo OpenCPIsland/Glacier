@@ -21,6 +21,7 @@ import { isInternalRequest } from "./utils/internalSecret.ts";
 import { isBanned, activeMute, activeMutes, setMute, liftMute } from "./services/moderation.ts";
 import { appearanceOf } from "./utils/appearance.ts";
 import { purgeChatLog } from "./services/chatLog.ts";
+import { respawnReady } from "./routes/reward.ts";
 
 // Initialize Express app
 const app = express();
@@ -280,7 +281,12 @@ app.post('/api/internal/room-collected', express.json(), (req, res) => {
     if (!isInternalRequest(req)) return res.status(403).json({ error: 'Forbidden' });
     const { username, room } = req.body ?? {};
     if (typeof username !== 'string' || typeof room !== 'string') return res.status(400).json({ error: 'Missing or invalid username or room' });
-    res.json({ collected: db.getRoomCollected(username, room) });
+        const now = Date.now();
+    const pending = {};
+    for (const [path, at] of Object.entries(db.getRoomCollected(username, room))) {
+        if (!respawnReady(room, path, at, now)) pending[path] = at;
+    }
+    res.json({ collected: pending });
 });
 
 /**
