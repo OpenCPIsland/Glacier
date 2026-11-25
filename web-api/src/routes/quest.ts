@@ -169,10 +169,9 @@ router.post('/quest/v1/progress', (req, res) => {
         objectives = req.body;
     }
     const definedObjectives = config.questDefinitions[activeQuest.questId]?.objectives ?? {};
-   objectives = (Array.isArray(objectives) ? objectives : [])
-    .slice(0, 100)
-    .map((o) => (typeof o === 'string' ? o.trim() : o))
-    .filter((o) => typeof o === 'string' && Object.hasOwn(definedObjectives, o));
+    objectives = (Array.isArray(objectives) ? objectives : [])
+        .slice(0, 100)
+        .filter((o) => typeof o === 'string' && Object.hasOwn(definedObjectives, o));
     
     console.log(`[QUEST] Objectives received: ${JSON.stringify(objectives)}`);
     
