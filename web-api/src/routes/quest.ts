@@ -12,8 +12,8 @@ import express from "express";
 const router = express.Router();
 import * as db from "../database.ts";
 import config from "../config.ts";
-import { signedResponse, buildQuestStateCollection, QuestStatus } from "../utils/response.ts";
-import { getMascotFromQuestId, addXpToInternal } from "../utils/xp.ts";
+import { signedResponse, buildQuestStateCollection, withAvailableQuests, QuestStatus } from "../utils/response.ts";
+import { getMascotFromQuestId, addXpToInternal, ensureMinLevel } from "../utils/xp.ts";
 import { logSafe } from "../utils/logSafe.ts";
 
 /**
@@ -169,9 +169,10 @@ router.post('/quest/v1/progress', (req, res) => {
         objectives = req.body;
     }
     const definedObjectives = config.questDefinitions[activeQuest.questId]?.objectives ?? {};
-    objectives = (Array.isArray(objectives) ? objectives : [])
-        .slice(0, 100)
-        .filter((o) => typeof o === 'string' && Object.hasOwn(definedObjectives, o));
+   objectives = (Array.isArray(objectives) ? objectives : [])
+    .slice(0, 100)
+    .map((o) => (typeof o === 'string' ? o.trim() : o))
+    .filter((o) => typeof o === 'string' && Object.hasOwn(definedObjectives, o));
     
     console.log(`[QUEST] Objectives received: ${JSON.stringify(objectives)}`);
     
@@ -340,7 +341,8 @@ router.post('/quest/v1/:questId', (req, res) => {
         // The completion reward needs a quest we know, completed for the
         // first time, with every objective it defines recorded.
         const questDef = Object.hasOwn(config.questDefinitions, questId) ? config.questDefinitions[questId] : null;
-        const missing = questDef ? Object.keys(questDef.objectives || {}).filter((o) => !quest.completedObjectives.includes(o)) : [];
+        const done = (quest.completedObjectives || []).map((s) => String(s).trim());
+        const missing = questDef ? Object.keys(questDef.objectives || {}).filter((o) => !done.includes(o.trim())) : [];
         if (wasFirstCompletion && (!questDef || missing.length > 0)) {
             console.log(`[QUEST] ${username} completed ${logSafe(questId)} without ${questDef ? `objectives ${logSafe(missing.join(','))}` : 'a quest definition'}: no completion reward`);
         }
@@ -375,14 +377,52 @@ router.post('/quest/v1/:questId', (req, res) => {
         db.updateQuestStatus(username, questId, QuestStatus.SUSPENDED);
     }
     
+    // Quest XP alone can't reach the level requirements of the next quests
+    // (see quests.json vs ProgressionMascotLevelXP.json), so lift the mascot
+    // to the level those quests need. Prevents soft-locks.
+    if (newStatus === QuestStatus.COMPLETED) {
+        unlockFollowUps(username);
+    }
+
     const response = {
         questId: questId,
-        questStateCollection: signedResponse(buildQuestStateCollection(db.getQuests(username)), swid)
+        questStateCollection: signedResponse(
+            buildQuestStateCollection(withAvailableQuests(db.getQuests(username), db.getMascotXP(username))),
+            swid
+        )
     };
     
     if (reward) response.reward = reward;
     res.json(response);
 });
+
+/**
+ * Raise mascot XP so every quest whose prerequisites are all completed also
+ * meets its level requirement. Never lowers XP. Safe to call repeatedly, and
+ * also usable to repair players who are already soft-locked (call it when a
+ * player joins a room, before the quest collection is built).
+ */
+function unlockFollowUps(username) {
+    const completed = new Set(
+        db.getQuests(username)
+            .filter(q => q.status === QuestStatus.COMPLETED || q.timesCompleted > 0)
+            .map(q => q.questId)
+    );
+    const xpByMascot = db.getMascotXP(username);
+
+    for (const [questId, def] of Object.entries(config.questDefinitions)) {
+        if (completed.has(questId)) continue;
+        if (!(def.prerequisites || []).every(p => completed.has(p))) continue;
+
+        const current = xpByMascot[def.mascot] || 0;
+        const raised = ensureMinLevel(def.mascot, current, def.levelRequirement || 0);
+        if (raised !== current) {
+            db.setMascotXP(username, def.mascot, raised);
+            xpByMascot[def.mascot] = raised;
+            console.log(`[QUEST] Raised ${def.mascot} XP for ${username}: ${current} -> ${raised} (needed for ${questId})`);
+        }
+    }
+}
 
 /**
  * Grant the reward for one quest objective. quest.c_obj carries only the
@@ -414,4 +454,4 @@ function grantQuestObjectiveReward(username, objectiveId) {
 }
 
 export default router;
-export { grantQuestObjectiveReward };
+export { grantQuestObjectiveReward, unlockFollowUps };
