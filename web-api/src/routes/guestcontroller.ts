@@ -355,8 +355,7 @@ router.post('/jgc/v5/client/:clientId/guest/login', loginLimit, authenticateApiK
         const token = generateTokens(swid);
         
         // Store tokens in database
-        db.storeGuestToken(token.access_token, 'access', swid, token.ttl);
-        db.storeGuestToken(token.refresh_token, 'refresh', swid, token.refresh_ttl);
+        db.storeGuestTokenPair(token, swid);
         
         const etags = generateEtags(swid, playerInfo.username);
         
@@ -439,15 +438,19 @@ router.post('/jgc/v5/client/:clientId/guest/refresh-auth/:refreshToken', (req, r
         return res.status(400).json(banned);
     }
     
-    // Clean up any old tokens for this SWID to prevent conflicts
-    db.deleteGuestTokensBySwid(swid);
+    // Revoke only the pair this refresh token came with (it and its access
+    // token). Deleting every token for the SWID logged out the account's
+    // other apps (the Mix app and Club Penguin Island share accounts): their
+    // tokens stopped working and their next refresh came back
+    // AUTHORIZATION_INVALID_REFRESH_TOKEN, which the SDK treats as revoked
+    // authentication.
+    db.deleteGuestTokenPair(refreshToken);
     
     // Generate new tokens
     const newToken = generateTokens(swid);
     
     // Store new tokens in database
-    db.storeGuestToken(newToken.access_token, 'access', swid, newToken.ttl);
-    db.storeGuestToken(newToken.refresh_token, 'refresh', swid, newToken.refresh_ttl);
+    db.storeGuestTokenPair(newToken, swid);
     
     // Get username for ETag generation
     const playerInfo = db.getPlayerBySwid(swid);
@@ -542,8 +545,7 @@ router.post('/jgc/v5/client/:clientId/guest/register', registerLimit, authentica
     const token = generateTokens(swid);
     
     // Store tokens in database
-    db.storeGuestToken(token.access_token, 'access', swid, token.ttl);
-    db.storeGuestToken(token.refresh_token, 'refresh', swid, token.refresh_ttl);
+    db.storeGuestTokenPair(token, swid);
     
     // Build response matching LogInData structure (register returns same as login)
     const responseData = {
