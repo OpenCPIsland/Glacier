@@ -243,15 +243,6 @@ function initializeDatabase() {
 
     // Daily task progress
     db.exec(`
-        -- Random Individual tasks a player's client filled its daily list
-        -- with, in place of today's Teamwork/Community entries (see
-        -- playerTaskIds in routes/task.ts). One day's worth per player.
-        CREATE TABLE IF NOT EXISTS daily_task_adopted (
-            username TEXT NOT NULL,
-            task_id TEXT NOT NULL,
-            day INTEGER NOT NULL,
-            PRIMARY KEY (username, task_id, day)
-        );
         CREATE TABLE IF NOT EXISTS community_tasks (
             task_id TEXT PRIMARY KEY,
             counter INTEGER NOT NULL DEFAULT 0,
@@ -1815,25 +1806,6 @@ function getTodaysDailyTask(username, taskId) {
     return row ? { taskId: row.task_id, counter: row.counter, day: row.day, claimed: row.claimed === 1 } : null;
 }
 
-// Today's adopted filler tasks for a player, oldest first.
-function getAdoptedDailyTasks(username) {
-    return db.prepare('SELECT task_id FROM daily_task_adopted WHERE username = ? AND day = ? ORDER BY rowid').all(username, currentTaskDay()).map(r => r.task_id);
-}
-
-// Adopts a filler task for today unless the player already has `max`.
-// Returns true if it is adopted (now or before). Earlier days are dropped.
-function adoptDailyTask(username, taskId, max) {
-    const day = currentTaskDay();
-    return db.transaction(() => {
-        db.prepare('DELETE FROM daily_task_adopted WHERE username = ? AND day != ?').run(username, day);
-        if (db.prepare('SELECT 1 FROM daily_task_adopted WHERE username = ? AND task_id = ? AND day = ?').get(username, taskId, day)) return true;
-        const n = db.prepare('SELECT COUNT(*) AS n FROM daily_task_adopted WHERE username = ? AND day = ?').get(username, day).n;
-        if (n >= max) return false;
-        db.prepare('INSERT INTO daily_task_adopted (username, task_id, day) VALUES (?, ?, ?)').run(username, taskId, day);
-        return true;
-    })();
-}
-
 // Marks today's row claimed. Returns false if it was already claimed or
 // doesn't exist, so a reward is paid once.
 function claimTodaysDailyTask(username, taskId) {
@@ -3234,8 +3206,6 @@ export {
     setDailyTaskCounter,
     getTodaysDailyTask,
     claimTodaysDailyTask,
-    getAdoptedDailyTasks,
-    adoptDailyTask,
     getCommunityTaskCounter,
     setCommunityTaskCounter,
     getOrCreateDailyTask,
