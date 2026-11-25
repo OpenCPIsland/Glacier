@@ -9,7 +9,7 @@ import { normalizeName } from "./utils/names.ts";
 import { Database } from "bun:sqlite";
 import path from "path";
 import { chmodSync } from "fs";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { parseJson, stringifyJson } from "./lib/bigJson.ts";
 import config from "./config.ts";
 
@@ -516,6 +516,11 @@ function initializeDatabase() {
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     `);
+    // Links an access token to the refresh token issued with it, so a
+    // refresh revokes that one login's pair and no other app's tokens.
+    const tokenCols = db.prepare("SELECT name FROM pragma_table_info('guest_controller_tokens')").all().map((c) => c.name);
+    if (!tokenCols.includes('pair_id')) db.exec('ALTER TABLE guest_controller_tokens ADD COLUMN pair_id TEXT');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_guest_controller_tokens_pair_id ON guest_controller_tokens(pair_id)');
 
     // Tokens are stored as SHA-256 hashes, so a copy of the database can't
     // be used to log in. Rows from before that are hashed here, which keeps
@@ -544,17 +549,54 @@ function initializeDatabase() {
     const apiKeyCols = db.prepare("SELECT name FROM pragma_table_info('guest_controller_api_keys')").all().map((c) => c.name);
     if (!apiKeyCols.includes('swid')) db.exec('ALTER TABLE guest_controller_api_keys ADD COLUMN swid TEXT');
 
-    // Mix user sessions - stores session data for Mix API
+    // Mix user sessions - stores session data for Mix API. One row per
+    // session, not per account: a player can be signed in on several Mix SDK
+    // clients at once (the Mix app and Club Penguin Island, or two devices),
+    // and starting a session on one must not end the others'.
     db.exec(`
         CREATE TABLE IF NOT EXISTS mix_user_sessions (
-            swid TEXT PRIMARY KEY,
-            session_id INTEGER NOT NULL,
+            session_id INTEGER PRIMARY KEY,
+            swid TEXT NOT NULL,
             hashed_user_id TEXT NOT NULL,
             symmetric_key BLOB NOT NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             last_activity TEXT DEFAULT CURRENT_TIMESTAMP
         )
     `);
+    // Older databases keyed this table by swid (one session per account).
+    // Rebuild it keyed by session_id, keeping the existing sessions.
+    {
+        const pk = db.prepare("SELECT name FROM pragma_table_info('mix_user_sessions') WHERE pk = 1").get();
+        if (pk && pk.name === 'swid') {
+            db.transaction(() => {
+                db.exec('ALTER TABLE mix_user_sessions RENAME TO mix_user_sessions_old');
+                db.exec(`
+                    CREATE TABLE mix_user_sessions (
+                        session_id INTEGER PRIMARY KEY,
+                        swid TEXT NOT NULL,
+                        hashed_user_id TEXT NOT NULL,
+                        symmetric_key BLOB NOT NULL,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        last_activity TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                `);
+                db.exec(`
+                    INSERT OR IGNORE INTO mix_user_sessions (session_id, swid, hashed_user_id, symmetric_key, created_at, last_activity)
+                    SELECT session_id, swid, hashed_user_id, symmetric_key, created_at, last_activity FROM mix_user_sessions_old
+                `);
+                db.exec('DROP TABLE mix_user_sessions_old');
+            })();
+            console.log('[DATABASE] Migrated mix_user_sessions to one row per session');
+        }
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_mix_user_sessions_swid ON mix_user_sessions(swid)');
+    // Which app the session belongs to (a hash of its X-Mix-ClientToken), so
+    // each app keeps one session: Club Penguin Island and the Mix app.
+    const mixSessionCols = db.prepare("SELECT name FROM pragma_table_info('mix_user_sessions')").all().map((c) => c.name);
+    if (!mixSessionCols.includes('client_key')) db.exec('ALTER TABLE mix_user_sessions ADD COLUMN client_key TEXT');
+    // Start order. Timestamps only have one-second resolution, so they can't
+    // tell which of two sessions started in the same second came first.
+    if (!mixSessionCols.includes('started_seq')) db.exec('ALTER TABLE mix_user_sessions ADD COLUMN started_seq INTEGER NOT NULL DEFAULT 0');
 
     // Mix friendships - friend relationships
     db.exec(`
@@ -2611,13 +2653,41 @@ function hashToken(token) {
  * @param {string} swid - The player's SWID
  * @param {number} ttlSeconds - Time to live in seconds
  */
-function storeGuestToken(token, tokenType, swid, ttlSeconds) {
+function storeGuestToken(token, tokenType, swid, ttlSeconds, pairId = null) {
     token = hashToken(token);
     const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
     db.prepare(`
-        INSERT INTO guest_controller_tokens (token, token_type, swid, expires_at)
-        VALUES (?, ?, ?, ?)
-    `).run(token, tokenType, swid, expiresAt);
+        INSERT INTO guest_controller_tokens (token, token_type, swid, expires_at, pair_id)
+        VALUES (?, ?, ?, ?, ?)
+    `).run(token, tokenType, swid, expiresAt, pairId);
+}
+
+/**
+ * Store the access and refresh token issued together (by a login, register
+ * or refresh). They share a pair id so a refresh can revoke exactly that
+ * pair, leaving the account's other logins (other apps) signed in.
+ */
+function storeGuestTokenPair(token, swid) {
+    const pairId = randomBytes(16).toString('hex');
+    db.transaction(() => {
+        storeGuestToken(token.access_token, 'access', swid, token.ttl, pairId);
+        storeGuestToken(token.refresh_token, 'refresh', swid, token.refresh_ttl, pairId);
+    })();
+}
+
+/**
+ * Revoke a refresh token and the access token issued with it.
+ * @param {string} refreshToken - The refresh token (plain)
+ */
+function deleteGuestTokenPair(refreshToken) {
+    const hashed = hashToken(refreshToken);
+    db.transaction(() => {
+        const row = db.prepare("SELECT pair_id FROM guest_controller_tokens WHERE token = ? AND token_type = 'refresh'").get(hashed);
+        if (row?.pair_id) {
+            db.prepare('DELETE FROM guest_controller_tokens WHERE pair_id = ?').run(row.pair_id);
+        }
+        db.prepare('DELETE FROM guest_controller_tokens WHERE token = ?').run(hashed);
+    })();
 }
 
 /**
@@ -2735,23 +2805,45 @@ function cleanupExpiredApiKeys() {
 
 // ========== MIX API OPERATIONS ==========
 
+// At most two Mix sessions per account: one for Club Penguin Island and one
+// for the Mix app. A new session replaces the same app's previous one; past
+// the cap, the least recently started session is dropped.
+const MAX_MIX_SESSIONS_PER_SWID = 2;
+
 /**
  * Store a Mix user session
  * @param {string} swid - The player's SWID
  * @param {number} sessionId - The session ID
  * @param {string} hashedUserId - The hashed user ID
  * @param {Buffer} symmetricKey - The symmetric key
+ * @param {string|null} clientToken - The app's X-Mix-ClientToken header
  */
-function storeMixSession(swid, sessionId, hashedUserId, symmetricKey) {
-    db.prepare(`
-        INSERT INTO mix_user_sessions (swid, session_id, hashed_user_id, symmetric_key)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(swid) DO UPDATE SET 
-            session_id = ?,
-            hashed_user_id = ?,
-            symmetric_key = ?,
-            last_activity = CURRENT_TIMESTAMP
-    `).run(swid, sessionId, hashedUserId, symmetricKey, sessionId, hashedUserId, symmetricKey);
+function storeMixSession(swid, sessionId, hashedUserId, symmetricKey, clientToken = null) {
+    const clientKey = clientToken ? createHash('sha256').update(String(clientToken)).digest('hex').slice(0, 16) : null;
+    db.transaction(() => {
+        if (clientKey) {
+            db.prepare('DELETE FROM mix_user_sessions WHERE swid = ? AND client_key = ? AND session_id != ?').run(swid, clientKey, sessionId);
+        }
+        const seq = db.prepare('SELECT COALESCE(MAX(started_seq), 0) + 1 AS n FROM mix_user_sessions').get().n;
+        db.prepare(`
+            INSERT INTO mix_user_sessions (session_id, swid, hashed_user_id, symmetric_key, client_key, started_seq)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+                swid = excluded.swid,
+                hashed_user_id = excluded.hashed_user_id,
+                symmetric_key = excluded.symmetric_key,
+                client_key = excluded.client_key,
+                started_seq = excluded.started_seq,
+                last_activity = CURRENT_TIMESTAMP
+        `).run(sessionId, swid, hashedUserId, symmetricKey, clientKey, seq);
+        db.prepare(`
+            DELETE FROM mix_user_sessions
+            WHERE swid = ? AND session_id NOT IN (
+                SELECT session_id FROM mix_user_sessions WHERE swid = ?
+                ORDER BY started_seq DESC LIMIT ?
+            )
+        `).run(swid, swid, MAX_MIX_SESSIONS_PER_SWID);
+    })();
 }
 
 /**
@@ -2760,7 +2852,7 @@ function storeMixSession(swid, sessionId, hashedUserId, symmetricKey) {
  * @returns {object|null} { sessionId, hashedUserId, symmetricKey } or null
  */
 function getMixSession(swid) {
-    const row = db.prepare('SELECT * FROM mix_user_sessions WHERE swid = ?').get(swid);
+    const row = db.prepare('SELECT * FROM mix_user_sessions WHERE swid = ? ORDER BY started_seq DESC LIMIT 1').get(swid);
     if (!row) return null;
     
     return {
@@ -2793,6 +2885,22 @@ function getMixSessionById(sessionId) {
  */
 function deleteMixSession(swid) {
     db.prepare('DELETE FROM mix_user_sessions WHERE swid = ?').run(swid);
+}
+
+/**
+ * Delete one Mix session, leaving the account's other sessions alone
+ * @param {number} sessionId - The session ID
+ */
+function deleteMixSessionById(sessionId) {
+    db.prepare('DELETE FROM mix_user_sessions WHERE session_id = ?').run(sessionId);
+}
+
+/**
+ * Number of Mix sessions an account has open
+ * @param {string} swid - The player's SWID
+ */
+function countMixSessions(swid) {
+    return db.prepare('SELECT COUNT(*) AS n FROM mix_user_sessions WHERE swid = ?').get(swid).n;
 }
 
 /**
@@ -3286,6 +3394,8 @@ export {
     
     // Guest controller tokens
     storeGuestToken,
+    storeGuestTokenPair,
+    deleteGuestTokenPair,
     getGuestToken,
     deleteGuestToken,
     deleteGuestTokensBySwid,
@@ -3301,6 +3411,8 @@ export {
     getMixSession,
     getMixSessionById,
     deleteMixSession,
+    deleteMixSessionById,
+    countMixSessions,
     updateMixSessionActivity,
     getMixFriendships,
     getMixAvatar,
