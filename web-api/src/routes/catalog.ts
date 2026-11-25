@@ -14,9 +14,18 @@
 import express from "express";
 const router = express.Router();
 
-// The one theme challenge this server runs, and what a first submission to it pays.
-const CURRENT_THEME_ID = 1;
+// Theme challenge IDs the server rotates through, one per UTC day, and what a
+// first submission to a theme pays.
+// NOTE: only IDs that exist in the client's theme data will display correctly.
+// Add more IDs here once you have confirmed them (e.g. [1, 2, 3, 4, 5]).
+const THEME_IDS = [1];
 const SUBMISSION_REWARD = 100;
+
+function currentThemeId() {
+    const day = Math.floor(Date.now() / 86400000); // changes at 00:00 UTC
+    return THEME_IDS[day % THEME_IDS.length];
+}
+
 import * as db from "../database.ts";
 import * as smartfox from "../smartfoxNotifier.ts";
 import { generateEquipmentId } from "../utils/session.ts";
@@ -35,7 +44,7 @@ router.get('/catalog/v1/clothing/themes/stats', (req, res) => {
     // Response: CurrentThemeResponse
     res.json({
         themes: [{
-            scheduledThemeChallengeId: CURRENT_THEME_ID,
+            scheduledThemeChallengeId: currentThemeId(),
             userSubmissionClothingCatalogId: 0,
             mostPopularItem: null,
             submissionRewardCoinAmount: SUBMISSION_REWARD
@@ -62,7 +71,7 @@ router.get('/catalog/v1/clothing/user/stats', (req, res) => {
     // Response: UserStatsResponse
     res.json({
         totalItemsSold: totalItemsSold,
-        totalItemsPurchased: 0, // Could track this in database
+        totalItemsPurchased: Object.keys(db.getCatalogPurchases(username)).length,
         mostPopularItem: userSubmissions.length > 0 ? 
             userSubmissions.reduce((best, item) => 
                 (item.numberSold || 0) > (best.numberSold || 0) ? item : best, userSubmissions[0]) : null,
@@ -78,28 +87,33 @@ router.get('/catalog/v1/clothing/user/stats', (req, res) => {
  */
 router.post('/catalog/v1/clothing/items/:catalogSection', (req, res) => {
     const { catalogSection } = req.params;
-    const { swid, username } = req.player;
+    const { username } = req.player;
     console.log(`[CATALOG] ${username} requested section: ${catalogSection}`);
-    
-    const scheduledThemeChallengeId = req.body.scheduledThemeChallengeId || 0;
-    let allSubmissions = db.getCatalogSubmissions ? 
-        db.getCatalogSubmissions(scheduledThemeChallengeId === 0 ? null : scheduledThemeChallengeId) : [];
-    
-    // Sort based on section type
+
+    const themeId = req.body.scheduledThemeChallengeId || 0;
+    let items = [...(db.getCatalogSubmissions?.(themeId === 0 ? null : themeId) ?? [])];
+
     if (catalogSection === 'recent') {
-        allSubmissions.sort((a, b) => b.clothingCatalogItemId - a.clothingCatalogItemId);
+        items.sort((a, b) => (b.equipment?.dateTimeCreated || 0) - (a.equipment?.dateTimeCreated || 0));
     } else if (catalogSection === 'popular') {
-        allSubmissions.sort((a, b) => (b.numberSold || 0) - (a.numberSold || 0));
+        items.sort((a, b) => (b.numberSold || 0) - (a.numberSold || 0));
     } else if (catalogSection === 'friends') {
-        // Filter to friends only - for now return all
-        allSubmissions = allSubmissions.filter(s => s.creatorName !== username);
+        items = items.filter(s => s.creatorName !== username); // TODO: real friends list
     }
-    
-    // Response: CatalogSectionResponse
-    res.json({
-        cursor: '',
-        items: allSubmissions
+
+    // The client treats equipment.equipmentId !== 0 as "owned".
+    // Creators own their own design, buyers get the id of the copy they bought,
+    // everyone else gets 0 so the item shows as buyable.
+    const bought = db.getCatalogPurchases(username);
+    const out = items.map(s => {
+        let equipmentId = 0;
+        if (s.creatorName === username) equipmentId = s.equipment.equipmentId;
+        else if (bought[s.clothingCatalogItemId]) equipmentId = bought[s.clothingCatalogItemId];
+        return { ...s, equipment: { ...s.equipment, equipmentId } };
     });
+
+    // Response: CatalogSectionResponse
+    res.json({ cursor: '', items: out });
 });
 
 /**
@@ -107,7 +121,7 @@ router.post('/catalog/v1/clothing/items/:catalogSection', (req, res) => {
  * Purchase a clothing item from the catalog
  * 
  * Request: ItemPurchaseRequest { clothingCatalogItemId }
- * Response: ItemPurchaseResponse { clothingCatalogItemId, equipment }
+ * Response: ItemPurchaseResponse { clothingCatalogItemId, equipmentId, newCoinTotal, equipment }
  */
 router.post('/catalog/v1/clothing/purchase', (req, res) => {
     const { swid, username } = req.player;
@@ -144,16 +158,16 @@ router.post('/catalog/v1/clothing/purchase', (req, res) => {
         db.addEquipmentTemplate(username, newEquipment.definitionId);
     }
     
-    // Increment sales counter for the item
-    if (db.incrementCatalogSales) {
-        db.incrementCatalogSales(clothingCatalogItemId);
-    }
+    // Remember the purchase (marks the item owned on reload) and bump the sold counter
+    db.recordCatalogPurchase(username, clothingCatalogItemId, newEquipment.equipmentId);
     
     console.log(`[CATALOG] ${username} purchased item ${clothingCatalogItemId} for ${cost} coins`);
     
     // Response: ItemPurchaseResponse
     res.json({
         clothingCatalogItemId: clothingCatalogItemId,
+        equipmentId: newEquipment.equipmentId,
+        newCoinTotal: db.getPlayerCoins(username),
         equipment: newEquipment
     });
 });
@@ -185,8 +199,9 @@ router.post('/catalog/v1/clothing/submit', (req, res) => {
     // item. The first one to the current theme challenge pays
     // SUBMISSION_REWARD (the client shows the coins as "rewarded"); it used
     // to pay every time and grant the template too.
-    const firstForTheme = scheduledThemeChallengeId === CURRENT_THEME_ID
-        && !(db.getCatalogSubmissions?.(null) ?? []).some((x) => x.creatorName === username && x.scheduledThemeChallengeId === CURRENT_THEME_ID);
+    const themeNow = currentThemeId();
+    const firstForTheme = scheduledThemeChallengeId === themeNow
+        && !(db.getCatalogSubmissions?.(null) ?? []).some((x) => x.creatorName === username && x.scheduledThemeChallengeId === themeNow);
     if (firstForTheme) db.addPlayerCoins(username, SUBMISSION_REWARD);
     
     // Update catalog task
