@@ -52,6 +52,11 @@ export class Session {
   heldObject: string | undefined;
   // "loc" user variable: Domain.LocomotionState byte (0 when cleared).
   locomotionState = 0;
+  // Sitting (5) or Zipline (6), worked out from an l.a Interact: the client
+  // never sends those as "loc" (see inferLocomotionState in daily-tasks.ts).
+  // Cleared by the next "loc", a jump, or walking away from the seat.
+  inferredLocomotionState: number | undefined;
+  inferredAt: number[] | undefined;
   // When the current snowball charge started (l.a ChargeThrow, ms), until
   // LaunchThrow or CancelThrow; and a party-game lobby item the player
   // interacted with meanwhile, joined once the throw ends.
