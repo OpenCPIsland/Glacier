@@ -81,7 +81,55 @@ const GROUP_COMMUNITY = 2;
 
 // LocomotionAction bytes.
 const LOCOMOTION_MOVE = 0;
+const LOCOMOTION_JUMP = 1;
 const LOCOMOTION_INTERACT = 2;
+
+// Domain.LocomotionState values the client never sends as "loc".
+const STATE_SITTING = 5;
+const STATE_ZIPLINE = 6;
+
+// The client's LocomotionBroadcaster.onControllerChanged sends "loc" for the
+// race, slide and run controllers but skips SitController and
+// ZiplineController: other clients see a player sit from the l.a Interact on
+// the seat. So "loc" never says Sitting, and every task that needs it
+// (TownWatchBusker, TownBench, BeachChairs, the picnic and Foodtrekker seats,
+// ...) could never count. The seat or zipline is recognised from the
+// interacted trigger's scene path; seat triggers (objects with
+// ChairProperties) are named SitTrigger, ChairTrigger, HotTubTrigger,
+// StoolTrigger, BleachersSitTrigger, PicnicTableTrigger, BeachTowelTrigger1,
+// FireLogChairTrigger1A, ThroneChair, FrontSeat, MossyLog's and RiverLog...
+const SEAT_PATH = /sit|chair|seat|stool|bench|throne|couch|hottub|towel|blanket|bleacher|picnic/i;
+const LOG_PATH = /Log\b/;
+const ZIPLINE_PATH = /zipline/i;
+// Further than this from where they sat down (m) and they've stood up. Sitting
+// snaps the penguin onto the seat, which moved it about 0.5 m in testing.
+const SEAT_LEAVE_DISTANCE = 2;
+
+export function inferLocomotionState(path: string): number | undefined {
+  if (ZIPLINE_PATH.test(path)) return STATE_ZIPLINE;
+  if (SEAT_PATH.test(path) || LOG_PATH.test(path)) return STATE_SITTING;
+  return undefined;
+}
+
+function distance(a: number[], b: number[]): number {
+  return Math.hypot((a[0] ?? 0) - (b[0] ?? 0), (a[1] ?? 0) - (b[1] ?? 0), (a[2] ?? 0) - (b[2] ?? 0));
+}
+
+// Updates session.inferredLocomotionState for one l.a, before switches are evaluated.
+function trackInferredState(session: Session, position: number[], action: number, interacted: string | undefined): void {
+  if (interacted !== undefined) {
+    session.inferredLocomotionState = inferLocomotionState(interacted);
+    session.inferredAt = session.inferredLocomotionState === undefined ? undefined : position;
+    return;
+  }
+  if (session.inferredLocomotionState === undefined) return;
+  const walkedOff = session.inferredLocomotionState === STATE_SITTING && session.inferredAt !== undefined
+    && distance(position, session.inferredAt) > SEAT_LEAVE_DISTANCE;
+  if (action === LOCOMOTION_JUMP || walkedOff) {
+    session.inferredLocomotionState = undefined;
+    session.inferredAt = undefined;
+  }
+}
 
 function taskCountPacket(taskId: string, counter: number): OutgoingPacket {
   const p = new SFSObjectWriter().putUtfString("t", taskId).putInt("c", counter);
@@ -172,6 +220,9 @@ function switchesFor(session: Session): PlayerSwitches {
   if (!sw || sw.zone !== zone) {
     sw = new PlayerSwitches(zone);
     switchState.set(session, sw);
+    // A new room: nobody arrives seated.
+    session.inferredLocomotionState = undefined;
+    session.inferredAt = undefined;
   }
   return sw;
 }
@@ -179,7 +230,7 @@ function switchesFor(session: Session): PlayerSwitches {
 function inputsOf(session: Session, position = session.lastPosition): PlayerInputs {
   return {
     position,
-    locomotionState: session.locomotionState,
+    locomotionState: session.inferredLocomotionState ?? session.locomotionState,
     held: session.heldObject,
     outfit: parseOutfit(session.outfitJson),
     tube: session.selectedTubeId,
@@ -344,6 +395,7 @@ export function onLocomotion(target: Target, previous: number[] | undefined, pos
     }
   }
   if (interacted !== undefined) target.session.lastInteraction = interacted;
+  trackInferredState(target.session, position, action, interacted);
   refresh(target, pathSamples(previous, position));
   if (interacted !== undefined) watcherEvent(target, (w) => w.type === "interaction" && w.path === interacted);
   if (action !== LOCOMOTION_MOVE) watcherEvent(target, (w) => w.type === "action" && w.actions?.includes(action) === true);
