@@ -363,6 +363,17 @@ function initializeDatabase() {
         )
     `);
 
+    // Catalog purchases (which player bought which catalog item)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS catalog_purchases (
+            username TEXT NOT NULL,
+            clothing_catalog_item_id INTEGER NOT NULL,
+            equipment_id INTEGER NOT NULL,
+            date_purchased INTEGER NOT NULL,
+            PRIMARY KEY (username, clothing_catalog_item_id)
+        )
+    `);
+
     // Consumable inventory
     db.exec(`
         CREATE TABLE IF NOT EXISTS consumable_inventory (
@@ -2153,6 +2164,29 @@ function addCatalogSubmission(username, submission) {
     );
 }
 
+/**
+ * Record a purchase and bump the item's sold counter
+ */
+function recordCatalogPurchase(username, clothingCatalogItemId, equipmentId) {
+    getOrCreatePlayer(username);
+    db.prepare(`
+        INSERT OR REPLACE INTO catalog_purchases (username, clothing_catalog_item_id, equipment_id, date_purchased)
+        VALUES (?, ?, ?, ?)
+    `).run(username, clothingCatalogItemId, equipmentId, Date.now());
+    db.prepare('UPDATE catalog_submissions SET number_sold = number_sold + 1 WHERE clothing_catalog_item_id = ?')
+        .run(clothingCatalogItemId);
+}
+
+/**
+ * Map of clothingCatalogItemId -> buyer's equipmentId for one player
+ */
+function getCatalogPurchases(username) {
+    const rows = db.prepare('SELECT clothing_catalog_item_id, equipment_id FROM catalog_purchases WHERE username = ?').all(username);
+    const map = {};
+    rows.forEach(r => { map[r.clothing_catalog_item_id] = r.equipment_id; });
+    return map;
+}
+
 // ========== CONSUMABLE INVENTORY OPERATIONS ==========
 
 /**
@@ -3204,6 +3238,8 @@ export {
     getCatalogSubmissions,
     getPlayerCatalogSubmissions,
     addCatalogSubmission,
+    recordCatalogPurchase,
+    getCatalogPurchases,
     
     // Consumables
     getConsumableInventory,
