@@ -14,16 +14,30 @@
 import express from "express";
 const router = express.Router();
 
-// Theme challenge IDs the server rotates through, one per UTC day, and what a
-// first submission to a theme pays.
-// NOTE: only IDs that exist in the client's theme data will display correctly.
-// Add more IDs here once you have confirmed them (e.g. [1, 2, 3, 4, 5]).
-const THEME_IDS = [1];
+// Daily theme challenge, driven by ClothingCatalogSchedules.json.
+// The schedule has one entry per day (2017-02-21 .. 2019-07-09). 2018 is the one
+// complete year (365 days), so today's month/day is looked up in 2018. That
+// puts seasonal themes on the right dates every year.
+import schedules from "../../data/ClothingCatalogSchedules.json";
+
+// true: send the schedule entry's Id; false: send its CatalogThemeId.
+// Test with schedule Id 7 (theme 65) to see which one the client expects.
+const SEND_SCHEDULE_ID = true;
+const SCHEDULE_YEAR = 2018;
 const SUBMISSION_REWARD = 100;
 
+const scheduleByDay = new Map<string, { Id: number; CatalogThemeId: number }>();
+for (const s of schedules) {
+    if (s.Year === SCHEDULE_YEAR) scheduleByDay.set(`${s.Month}-${s.Day}`, s);
+}
+
 function currentThemeId() {
-    const day = Math.floor(Date.now() / 86400000); // changes at 00:00 UTC
-    return THEME_IDS[day % THEME_IDS.length];
+    const now = new Date(); // UTC day; rolls over at 00:00 UTC
+    let key = `${now.getUTCMonth() + 1}-${now.getUTCDate()}`;
+    if (key === '2-29') key = '2-28'; // 2018 has no Feb 29
+    const entry = scheduleByDay.get(key);
+    if (!entry) return 1;
+    return SEND_SCHEDULE_ID ? entry.Id : entry.CatalogThemeId;
 }
 
 import * as db from "../database.ts";
