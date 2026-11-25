@@ -45,6 +45,14 @@ import * as smartfox from "../smartfoxNotifier.ts";
 import { generateEquipmentId } from "../utils/session.ts";
 import { NOT_ENOUGH_COINS } from "../utils/counts.ts";
 
+// The client treats equipment.equipmentId !== 0 as "owned". Only a purchase
+// owns a catalog item: buyers get the id of the copy they bought, everyone
+// else (the creator included) gets 0 so the item shows as buyable.
+function withOwnership(items, username) {
+    const bought = db.getCatalogPurchases(username);
+    return items.map(s => ({ ...s, equipment: { ...s.equipment, equipmentId: bought[s.clothingCatalogItemId] || 0 } }));
+}
+
 /**
  * GET /catalog/v1/clothing/themes/stats
  * Get current theme challenge stats
@@ -55,12 +63,20 @@ router.get('/catalog/v1/clothing/themes/stats', (req, res) => {
     const { swid, username } = req.player;
     console.log(`[CATALOG] ${username} requested themes stats`);
     
+    // mostPopularItem is the theme's icon and top seller on the catalog
+    // home page: the most sold submission, newest first on a tie.
+    const themeId = currentThemeId();
+    const submissions = withOwnership(db.getCatalogSubmissions(themeId), username);
+    const mostPopularItem = submissions.reduce((best, item) => !best
+        || (item.numberSold || 0) > (best.numberSold || 0)
+        || ((item.numberSold || 0) === (best.numberSold || 0) && (item.dateSubmitted || 0) > (best.dateSubmitted || 0)) ? item : best, null);
+    
     // Response: CurrentThemeResponse
     res.json({
         themes: [{
-            scheduledThemeChallengeId: currentThemeId(),
+            scheduledThemeChallengeId: themeId,
             userSubmissionClothingCatalogId: 0,
-            mostPopularItem: null,
+            mostPopularItem,
             submissionRewardCoinAmount: SUBMISSION_REWARD
         }]
     });
@@ -77,8 +93,8 @@ router.get('/catalog/v1/clothing/user/stats', (req, res) => {
     console.log(`[CATALOG] ${username} requested user stats`);
     
     // Get user's catalog statistics
-    const userSubmissions = db.getCatalogSubmissions ? 
-        db.getCatalogSubmissions(null).filter(s => s.creatorName === username) : [];
+    const userSubmissions = withOwnership(db.getCatalogSubmissions ? 
+        db.getCatalogSubmissions(null).filter(s => s.creatorName === username) : [], username);
     
     const totalItemsSold = userSubmissions.reduce((sum, item) => sum + (item.numberSold || 0), 0);
     
@@ -115,19 +131,8 @@ router.post('/catalog/v1/clothing/items/:catalogSection', (req, res) => {
         items = items.filter(s => s.creatorName !== username); // TODO: real friends list
     }
 
-    // The client treats equipment.equipmentId !== 0 as "owned".
-    // Creators own their own design, buyers get the id of the copy they bought,
-    // everyone else gets 0 so the item shows as buyable.
-    const bought = db.getCatalogPurchases(username);
-    const out = items.map(s => {
-        let equipmentId = 0;
-        if (s.creatorName === username) equipmentId = s.equipment.equipmentId;
-        else if (bought[s.clothingCatalogItemId]) equipmentId = bought[s.clothingCatalogItemId];
-        return { ...s, equipment: { ...s.equipment, equipmentId } };
-    });
-
     // Response: CatalogSectionResponse
-    res.json({ cursor: '', items: out });
+    res.json({ cursor: '', items: withOwnership(items, username) });
 });
 
 /**
