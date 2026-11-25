@@ -30,6 +30,17 @@ import { signedResponse, QuestStatus } from "../utils/response.ts";
 import * as smartfox from "../smartfoxNotifier.ts";
 import { buildContentIdentifier } from "./game.ts";
 import { logSafe } from "../utils/logSafe.ts";
+import lots from "../../data/lots.json";
+
+// The lot of the player's active igloo layout. The client joins the igloo
+// named by this zoneId (ProfileData.ZoneId, for the owner and for visitors),
+// as its own offline GetLocalPlayerDataOperation fills it from the active
+// layout; always sending DefaultIgloo put a big lot's decorations on the
+// default lot.
+function iglooZoneName(username) {
+    const zone = db.getIglooData(username)?.activeLayout?.zoneId;
+    return typeof zone === 'string' && Object.hasOwn(lots, zone) ? zone : 'DefaultIgloo';
+}
 
 // =============================================================================
 // Helper Functions
@@ -187,7 +198,7 @@ function buildLocalPlayerData(username, swid) {
         
         // ZoneId
         zoneId: { 
-            name: 'DefaultIgloo', 
+            name: iglooZoneName(username), 
             instanceId: swid 
         },
         
@@ -328,7 +339,7 @@ export function buildOtherPlayerData(username, swid, displayName = null) {
         
         // ZoneId
         zoneId: { 
-            name: 'DefaultIgloo', 
+            name: iglooZoneName(username), 
             instanceId: swid 
         }
     };
