@@ -53,11 +53,7 @@ const PRIZE_COINS = {
 // Mascot names are the MascotDefinition names used by quests.json and the
 // mascot_xp table: AuntArctic, DJCadence, Rockhopper, Rookie.
 // The values come from each prize's Reward asset (MascotXP list: Mascot + XP).
-//
-// PLACEHOLDER: only 'Anchor' is confirmed from its asset (Rockhopper, 10 XP).
-// Every other entry is a placeholder of 0 XP, which awards nothing. Replace
-// the mascot and amount with the real values from each prize's Reward asset.
-// A prize can list several mascots, or {} for none.
+
 const PRIZE_MASCOT_XP: Record<string, Record<string, number>> = {
     'Seaweed':        { Rookie: 2 },
     'Small Fish 1':   { AuntArctic: 3 },
