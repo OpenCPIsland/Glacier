@@ -12,6 +12,7 @@ import express from "express";
 const router = express.Router();
 import * as db from "../database.ts";
 import { getSessionIdForUser } from "../utils/session.ts"; // adjust path if session.ts lives elsewhere
+import { addXpToInternal } from "../utils/xp.ts";
 
 /**
  * Wrap response in SignedResponse format
@@ -134,7 +135,7 @@ const CAST_TTL_MS = 5 * 60_000;
 // A scripted client could cast and catch nonstop; the minigame takes
 // seconds to play. A catch sooner than FISHING_MIN_CATCH_MS after its cast
 // pays nothing, and casts closer than FISHING_MIN_CAST_MS are refused.
-const MIN_CATCH_MS = Number(process.env.FISHING_MIN_CATCH_MS ?? 3000);
+const MIN_CATCH_MS = Number(process.env.FISHING_MIN_CATCH_MS ?? 1500);
 const MIN_CAST_MS = Number(process.env.FISHING_MIN_CAST_MS ?? 5000);
 const lastCast = new Map<string, { prizes: Set<string>; at: number }>();
 const lastCastAt = new Map<string, number>();
@@ -207,8 +208,13 @@ router.post('/minigame/v1/fishing/catch', (req, res) => {
 
     // Save the rewards to the player
     if (coinReward > 0) db.addPlayerCoins(username, coinReward);
+    // Prize XP is raw XP. Mascot XP is stored in internal format (1,000,000
+    // per level), so convert it the same way quest and daily spin rewards do.
     for (const [mascot, xp] of Object.entries(mascotXp)) {
-        db.addMascotXP(username, mascot, xp);
+        const currentXp = db.getMascotXP(username)[mascot] || 0;
+        const newXp = addXpToInternal(mascot, xp, currentXp);
+        db.setMascotXP(username, mascot, newXp);
+        console.log(`[MINIGAME] Fishing XP: ${mascot} +${xp} raw -> ${newXp} internal (was ${currentXp}) for ${username}`);
     }
 
     // Build reward structure. The client parses each reward map key with
