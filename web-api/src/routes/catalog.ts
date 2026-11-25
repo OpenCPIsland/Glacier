@@ -44,13 +44,21 @@ import * as db from "../database.ts";
 import * as smartfox from "../smartfoxNotifier.ts";
 import { generateEquipmentId } from "../utils/session.ts";
 import { NOT_ENOUGH_COINS } from "../utils/counts.ts";
+import { templateCost } from "../utils/prices.ts";
+
+// A catalog item always costs its equipment template's Cost from the game
+// definitions, for old, current and new submissions alike; the stored cost
+// is never used. null for a template the designer can't make.
+function itemCost(s) {
+    return templateCost(s.equipment?.definitionId);
+}
 
 // The client treats equipment.equipmentId !== 0 as "owned". Only a purchase
 // owns a catalog item: buyers get the id of the copy they bought, everyone
 // else (the creator included) gets 0 so the item shows as buyable.
 function withOwnership(items, username) {
     const bought = db.getCatalogPurchases(username);
-    return items.map(s => ({ ...s, equipment: { ...s.equipment, equipmentId: bought[s.clothingCatalogItemId] || 0 } }));
+    return items.map(s => ({ ...s, cost: itemCost(s), equipment: { ...s.equipment, equipmentId: bought[s.clothingCatalogItemId] || 0 } }));
 }
 
 /**
@@ -158,7 +166,8 @@ router.post('/catalog/v1/clothing/purchase', (req, res) => {
     }
     
     // Deduct cost and add equipment
-    const cost = Number.isSafeInteger(item.cost) && item.cost >= 0 ? item.cost : 100;
+    const cost = itemCost(item);
+    if (cost === null) return res.status(400).json({ error: 'Item has no cost' });
     if (db.getPlayerCoins(username) < cost) return res.status(400).json({ code: NOT_ENOUGH_COINS });
     db.addPlayerCoins(username, -cost);
     
@@ -213,6 +222,8 @@ router.post('/catalog/v1/clothing/submit', (req, res) => {
         definitionId: equipment.definitionId || 0,
         parts: equipment.parts || []
     };
+    const cost = itemCost({ equipment: newEquipment });
+    if (cost === null) return res.status(400).json({ error: 'Item has no cost' });
     
     // A submission lists a design the player already made and creates no
     // item. The first one to the current theme challenge pays
@@ -232,7 +243,7 @@ router.post('/catalog/v1/clothing/submit', (req, res) => {
         db.addCatalogSubmission(username, {
             clothingCatalogItemId,
             creatorName: username,
-            cost: 100,
+            cost,
             numberSold: 0,
             scheduledThemeChallengeId,
             dateSubmitted: Date.now(),
