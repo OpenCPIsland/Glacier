@@ -52,7 +52,9 @@ router.put('/session/user', authenticateMix, (req, res) => {
         );
         
         // Store session in database with the symmetric key for later use
-        db.storeMixSession(UserId, sessionId, hashedUserId, symmetricKey);
+        // The client token says which app this is (CPI or the Mix app), so
+        // each app keeps its own session instead of replacing the other's.
+        db.storeMixSession(UserId, sessionId, hashedUserId, symmetricKey, req.headers['x-mix-clienttoken'] ?? null);
         
         // Set presence to ACTIVE when session is created
         db.setMixPresenceState(UserId, 'ACTIVE');
@@ -79,8 +81,19 @@ router.post('/session/user/delete', authenticateMix, (req, res) => {
     // not touch the user's friendships, invitations, alerts or pending
     // notifications; it used to delete them all, so every logout (CPI or
     // Mix) erased that player's half of their friends list.
-    db.deleteMixSession(UserId);
-    db.deleteMixPresenceState(UserId);
+    // End only the session this client is logging out of: the same account
+    // may be signed in elsewhere (the Mix app and Club Penguin Island share
+    // accounts). The SDK's logout is sent encrypted, so the session is named
+    // by its header; without one, fall back to ending all of them.
+    const sessionId = Number(req.headers['x-mix-usersessionid']);
+    if (req.mixSessionSwid && Number.isSafeInteger(sessionId)) {
+        db.deleteMixSessionById(sessionId);
+    } else {
+        db.deleteMixSession(UserId);
+    }
+    if (db.countMixSessions(UserId) === 0) {
+        db.deleteMixPresenceState(UserId);
+    }
     
     res.json(buildResponse());
 });
