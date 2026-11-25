@@ -137,6 +137,10 @@ function trackLocomotionState(vars: SFSValue[], ctx: HandlerContext): void {
     const [name, , value] = v.value;
     if (name?.type !== SFSDataType.UTF_STRING || name.value !== "loc") continue;
     ctx.session.locomotionState = typeof value?.value === "number" ? value.value : 0;
+    // Standing up or getting off a zipline swaps the controller back, which
+    // sends "loc" Default: whatever was inferred is over.
+    ctx.session.inferredLocomotionState = undefined;
+    ctx.session.inferredAt = undefined;
   }
 }
 
