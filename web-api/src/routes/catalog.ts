@@ -31,13 +31,32 @@ for (const s of schedules) {
     if (s.Year === SCHEDULE_YEAR) scheduleByDay.set(`${s.Month}-${s.Day}`, s);
 }
 
-function currentThemeId() {
-    const now = new Date(); // UTC day; rolls over at 00:00 UTC
-    let key = `${now.getUTCMonth() + 1}-${now.getUTCDate()}`;
+function themeIdOn(date: Date) {
+    let key = `${date.getUTCMonth() + 1}-${date.getUTCDate()}`;
     if (key === '2-29') key = '2-28'; // 2018 has no Feb 29
     const entry = scheduleByDay.get(key);
     if (!entry) return 1;
     return SEND_SCHEDULE_ID ? entry.Id : entry.CatalogThemeId;
+}
+
+function currentThemeId() {
+    return themeIdOn(new Date()); // UTC day; rolls over at 00:00 UTC
+}
+
+// The theme challenge changes every day. The catalog home page lists one
+// card per theme in themes/stats (CatalogDailyChallengeScroller), each
+// opening its own listing, and takes the first as today's: so today's
+// challenge first, then the CATALOG_WINDOW_DAYS - 1 days before it.
+const CATALOG_WINDOW_DAYS = 7;
+
+function thisWeeksThemeIds(): number[] {
+    const ids: number[] = [];
+    const now = Date.now();
+    for (let i = 0; i < CATALOG_WINDOW_DAYS; i++) {
+        const id = themeIdOn(new Date(now - i * 86400000));
+        if (!ids.includes(id)) ids.push(id);
+    }
+    return ids;
 }
 
 import * as db from "../database.ts";
@@ -73,21 +92,24 @@ router.get('/catalog/v1/clothing/themes/stats', (req, res) => {
     
     // mostPopularItem is the theme's icon and top seller on the catalog
     // home page: the most sold submission, newest first on a tie.
-    const themeId = currentThemeId();
-    const submissions = withOwnership(db.getCatalogSubmissions(themeId), username);
-    const mostPopularItem = submissions.reduce((best, item) => !best
-        || (item.numberSold || 0) > (best.numberSold || 0)
-        || ((item.numberSold || 0) === (best.numberSold || 0) && (item.dateSubmitted || 0) > (best.dateSubmitted || 0)) ? item : best, null);
-    
-    // Response: CurrentThemeResponse
-    res.json({
-        themes: [{
+    // Today's challenge always; a past day only if anything was submitted to it
+    // (a day from before the catalog had players never happened here).
+    const themes = thisWeeksThemeIds().map((themeId) => ({ themeId, submissions: withOwnership(db.getCatalogSubmissions(themeId), username) }))
+        .filter(({ submissions }, i) => i === 0 || submissions.length > 0)
+        .map(({ themeId, submissions }) => {
+        const mostPopularItem = submissions.reduce((best, item) => !best
+            || (item.numberSold || 0) > (best.numberSold || 0)
+            || ((item.numberSold || 0) === (best.numberSold || 0) && (item.dateSubmitted || 0) > (best.dateSubmitted || 0)) ? item : best, null);
+        return {
             scheduledThemeChallengeId: themeId,
             userSubmissionClothingCatalogId: 0,
             mostPopularItem,
             submissionRewardCoinAmount: SUBMISSION_REWARD
-        }]
+        };
     });
+    
+    // Response: CurrentThemeResponse
+    res.json({ themes });
 });
 
 /**
