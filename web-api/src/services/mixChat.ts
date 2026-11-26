@@ -9,6 +9,7 @@
 //   it through its sequence queue, so it is a real stored notification.
 import * as db from "../database.ts";
 import { notifyMany, notify, type MixNotification } from "./mixNotify.ts";
+import { pushChatMessage } from "./mixPush.ts";
 import { mixUser } from "../routes/mix/common.ts";
 import { MixError } from "./mixErrors.ts";
 import { filterText } from "./moderation.ts";
@@ -313,6 +314,7 @@ function storeMessage(sender: string, tid: number, cid: number | bigint, type: s
     const id = Number(sql.query(`INSERT INTO mix_chat_messages (thread_id, seq, sender_swid, client_message_id, type, payload, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)`).run(tid, seq, sender, cid, type, JSON.stringify(payload), new Date().toISOString()).lastInsertRowid);
     const message = toMessageDto(sql.query(`${MSG} WHERE id = ?`).get(id) as MessageRow);
+    pushChatMessage(message, recipients);
     return notifyMany(recipients, NOTIFICATION_TYPE[type]!, () => ({ Message: message }));
 }
 
