@@ -2,6 +2,7 @@ import express from "express";
 import * as db from "../../database.ts";
 import { inTransaction } from "../../database.ts";
 import { notify } from "../../services/mixNotify.ts";
+import { pushFriendshipInvitation, pushFriendshipAdded } from "../../services/mixPush.ts";
 import { authenticateMix } from "./auth.ts";
 import { buildResponse, generateId, mixUser, userAvatar } from "./common.ts";
 import { onFriendshipTrustRemoved } from "../../services/mixChat.ts";
@@ -70,6 +71,7 @@ router.put('/friendship', authenticateMix, (req, res) => inTransaction(() => {
     const accepter = db.getPlayerBySwid(UserId);
     
     // The original inviter learns the invitation was accepted.
+    pushFriendshipAdded(friend.swid, UserId);
     notify(friend.swid, 'AddFriendship', {
         Friend: mixUser(UserId, accepter),
         FriendshipInvitationId: InvitationId,
@@ -182,7 +184,9 @@ router.put('/friendship/invitation', authenticateMix, (req, res) => inTransactio
     db.addMixFriendshipInvitation(invitationId, UserId, InviteeDisplayName, true, IsTrusted || false, invitee.swid);
     db.addMixFriendshipInvitation(invitationId, invitee.swid, inviterName, false, IsTrusted || false, UserId);
     
-    // The invitee receives it through /notifications/sinceSequence.
+    // The invitee receives it through /notifications/sinceSequence, and a
+    // push if their device has one registered.
+    pushFriendshipInvitation(invitee.swid, UserId, invitationId);
     notify(invitee.swid, 'AddFriendshipInvitation', {
         Invitation: {
             FriendshipInvitationId: invitationId,
