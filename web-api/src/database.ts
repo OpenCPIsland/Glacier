@@ -2513,19 +2513,23 @@ function getIglooPopulations(clientVersion = null) {
 }
 
 /**
- * Public igloos with someone inside, busiest first.
+ * Public igloos, busiest first; then the empty ones, most recently decorated
+ * first, so the list isn't empty whenever nobody happens to be in an igloo.
  * @returns {{ swid: string, username: string, displayName: string, count: number }[]}
  */
 function getPopularIgloos(clientVersion = null, limit = 50) {
     return db.prepare(`
-        SELECT i.swid AS swid, i.username AS username, i.display_name AS displayName, COUNT(*) AS count
-        FROM player_sessions s
-        JOIN player_identity i ON i.swid = s.instance_id
-        JOIN igloo_data d ON d.username = i.username
-        WHERE s.world = 'Igloo' AND d.visibility = 2 AND ${ONLINE_SQL.replaceAll('last_activity', 's.last_activity').replaceAll('confirmed', 's.confirmed').replaceAll('created_at', 's.created_at')}
-          AND (? IS NULL OR COALESCE(s.client_version, ?) = ?)
-        GROUP BY i.swid
-        ORDER BY count DESC, i.username
+        SELECT i.swid AS swid, i.username AS username, i.display_name AS displayName,
+            (SELECT COUNT(*) FROM player_sessions s
+             WHERE s.world = 'Igloo' AND s.instance_id = i.swid
+               AND ${ONLINE_SQL.replaceAll('last_activity', 's.last_activity').replaceAll('confirmed', 's.confirmed').replaceAll('created_at', 's.created_at')}
+               AND (? IS NULL OR COALESCE(s.client_version, ?) = ?)) AS count,
+            COALESCE(l.last_modified_date, 0) AS modified
+        FROM igloo_data d
+        JOIN player_identity i ON i.username = d.username
+        LEFT JOIN igloo_layouts l ON l.layout_id = d.active_layout_id AND l.username = d.username
+        WHERE d.visibility = 2
+        ORDER BY count DESC, modified DESC, i.username
         LIMIT ?
     `).all(SESSION_ONLINE_WINDOW, SESSION_CONNECT_GRACE, clientVersion, config.content.clientVersion, clientVersion, limit);
 }
