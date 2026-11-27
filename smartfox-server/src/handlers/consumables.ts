@@ -272,7 +272,8 @@ function useConsumable(ctx: HandlerContext, cmd: string, type: string, partialCo
     default:
       log(`${ctx.peer} - ${cmd}: ${type} is a ${def.experience} consumable, not implemented yet`);
   }
-  onConsumableUsed(ctx, type);
+  // A held item counts for "eaten" watchers when it's eaten (handlePlayerInteraction).
+  onConsumableUsed(ctx, type, def.experience === "playerHeld" ? "start" : "both");
 }
 
 // "con.use" - type = JSON SignedResponse<UsedConsumable> {type,
@@ -596,6 +597,9 @@ function handlePlayerInteraction(ctx: HandlerContext, targetSessionId: string): 
       if (session.equippedConsumable === name && session.heldActionCount === 0) removeHeldItem(session);
     }, EATEN_ITEM_REMOVE_DELAY_MS);
     log(`${ctx.peer} - ate ${name}`);
+    // Daily challenges counting food eaten (most community ones: fish dogs,
+    // smoothies, cake...), stand and tray food included.
+    onConsumableUsed(ctx, name, "complete");
     return;
   }
   const holderEntry = getByRoomExcluding(session.roomName, session.userId).find((e) => e.session.playerSessionId === targetSessionId);
