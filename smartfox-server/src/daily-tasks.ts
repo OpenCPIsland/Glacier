@@ -43,6 +43,9 @@ interface Watcher {
   criteriaSwitch?: string;
   actions?: number[];
   consumables?: string[];
+  // ConsumableWatcher.Event: 0 START (the item is taken out), 1 COMPLETE (it's
+  // eaten / used up, the client's default).
+  event?: number;
   matchType?: number;
   matchCounting?: number;
   texts?: string[];
@@ -414,11 +417,26 @@ export function onPlayerLeft(session: Session): void {
   checkRoomWatchers(session.roomName);
 }
 
-// con.use / con.reuse: the consumable's NameOnServer. The client's watcher
-// counts only consumables in its list.
-export function onConsumableUsed(target: Target, type: string): void {
-  watcherEvent(target, (w) => w.type === "consumable" && w.consumables?.includes(type) === true);
-  forEachWatcher("consumable", (_id, w) => (w.consumables?.includes(type) ? 1 : 0), target);
+// A consumable's NameOnServer at one moment of its use; the client's watcher
+// counts only consumables in its list, at its Event:
+//  - "start": a held item is taken out (con.use of a tray or a held snack)
+//  - "complete": a held item is eaten, including food taken from a stand or
+//    someone's tray ("…ServerAdded"), which never goes through con.use
+//  - "both": anything used up at once (fireworks, party blasters, one-shot
+//    props), where taking it out and finishing it are the same moment
+export type ConsumableMoment = "start" | "complete" | "both";
+
+const CONSUMABLE_START = 0;
+
+export function onConsumableUsed(target: Target, type: string, moment: ConsumableMoment = "both"): void {
+  const counts = (w: Watcher) => {
+    if (w.type !== "consumable" || w.consumables?.includes(type) !== true) return false;
+    if (moment === "both") return true;
+    const atStart = w.event === CONSUMABLE_START;
+    return moment === "start" ? atStart : !atStart;
+  };
+  watcherEvent(target, counts);
+  forEachWatcher("consumable", (_id, w) => (counts(w) ? 1 : 0), target);
 }
 
 // wsevent fishing catch: details is the winning reward's name. An empty
@@ -432,6 +450,25 @@ export function onFishCaught(target: Target, rewardName: string): void {
 export function onChatMessage(target: Target, message: string, sizzleClip: number): void {
   watcherEvent(target, (w) => w.type === "chat" && chatMatches(w, message, sizzleClip) > 0);
   forEachWatcher("chat", (_id, w) => chatMatches(w, message, sizzleClip), target);
+}
+
+// Watcher events that happen over HTTP (the WebAPI forwards them, see
+// notify-listener.ts TASK_EVENT): a consumable bought (count of them), an
+// item submitted to the clothing catalog, a piece of clothing made. Run here
+// rather than in the WebAPI so criteria switches (BeachMarketPurchase only
+// counts at the market), task.c, community broadcasts and TaskCompletion all
+// work as for the other watchers.
+export const WEB_TASK_EVENTS = ["consumablePurchase", "submitCatalogItem", "createCustomEquipped"] as const;
+export type WebTaskEvent = (typeof WEB_TASK_EVENTS)[number];
+
+export function onWebTaskEvent(target: Target, type: WebTaskEvent, consumable?: string, count = 1): void {
+  const times = Math.max(1, Math.floor(count));
+  forEachWatcher(type, (_id, w) => {
+    // ConsumablePurchaseWatcher: an empty list matches every consumable,
+    // and it counts once per item bought.
+    if (type === "consumablePurchase") return !w.consumables?.length || (consumable !== undefined && w.consumables.includes(consumable)) ? times : 0;
+    return 1;
+  }, target);
 }
 
 // ==================== Chat matching ====================
