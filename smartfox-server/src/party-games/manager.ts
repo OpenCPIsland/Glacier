@@ -120,12 +120,16 @@ export function startPartyGame(templateId: number, players: RegisteredSession[],
   const game = factory(nextSessionId++, def, players, slots);
   sessions.set(game.id, game);
   for (const p of players) sessionByUser.set(p.session.userId, game);
-  if (def.playerProp) for (const p of players) setPartyGameProp(p, def.playerProp);
   // Session ids can exceed 2^53, so they're spliced in as raw text.
   const playerData = `{"Players":[${players.map((p, i) => `{"TeamId":${slots?.[i]?.teamId ?? 0},"UserSessionId":${p.session.playerSessionId},"RoleId":${slots?.[i]?.roleId ?? 0}}`).join(",")}]}`;
   const start = extensionPacket("pgame.start.v2",
     new SFSObjectWriter().putInt("id", game.id).putInt("template", templateId).putUtfString("players", playerData));
   for (const p of players) p.send(start);
+  // The game prop only after pgame.start: the client's session hooks the
+  // prop's spawn when it starts (Fish Bucket's onPropSpawned finds each
+  // player's bucket there, and its animation waits for EPropRetrieved). A
+  // prop that spawned first was missed, and the buckets never filled.
+  if (def.playerProp) for (const p of players) setPartyGameProp(p, def.playerProp);
   log(`session ${game.id} (template ${templateId}) started: ${players.map((p) => p.session.userName).join(", ")}`);
   guarded(game, () => game.onStart());
   return game;
