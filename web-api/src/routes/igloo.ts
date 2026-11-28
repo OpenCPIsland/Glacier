@@ -46,6 +46,32 @@ function signedResponse(data, swid) {
 const lotMaxItems = lots as Record<string, number>;
 
 /**
+ * Tops up the decorations and structures the player's completed quests gave,
+ * as the client does for itself (DecorationInventoryService
+ * EnsureQuestCompletionReward). Quest completion used not to save them here,
+ * so a player who placed one had every layout save refused.
+ */
+function ensureQuestDecorations(username) {
+    for (const quest of db.getQuests(username)) {
+        if (quest.status !== 3 && !(quest.timesCompleted > 0)) continue; // QuestStatus.COMPLETED
+        const reward = config.questDefinitions?.[quest.questId]?.completeReward;
+        if (!reward) continue;
+        for (const [field, type] of [['decorationInstances', 0], ['structureInstances', 1]] as const) {
+            for (const [definitionId, count] of Object.entries(reward[field] || {})) {
+                const id = Number(definitionId);
+                const have = db.getDecorationInventory(username).items
+                    .filter((i) => i.decorationId.type === type && i.decorationId.definitionId === id && i.decorationId.customId == null)
+                    .reduce((n, i) => n + i.count, 0);
+                if (have < Number(count)) {
+                    db.addDecoration(username, { definitionId: id, type, customId: null }, Number(count) - have);
+                    console.log(`[IGLOO] ${username} given ${field} ${id} x${Number(count) - have} from completed quest ${quest.questId}`);
+                }
+            }
+        }
+    }
+}
+
+/**
  * Why a layout can't be saved, or null. The client's own limits, checked
  * here too: the zone is a real lot, the layout holds at most that lot's
  * MaxItems, and nothing is placed more often than the player owns it.
@@ -58,6 +84,7 @@ function layoutProblem(username, layout): string | null {
     const items = layout.decorationsLayout;
     if (!Array.isArray(items)) return 'decorationsLayout is not a list';
     if (items.length > lotMaxItems[layout.zoneId]!) return 'too many items';
+    ensureQuestDecorations(username);
     if (!Number.isInteger(layout.lightingId) || !Number.isInteger(layout.musicId)) return 'bad lighting or music';
     if (typeof layout.name !== 'string' || !layout.extraInfo || typeof layout.extraInfo !== 'object' || Array.isArray(layout.extraInfo)) return 'bad name or extraInfo';
 
@@ -380,14 +407,21 @@ router.delete('/igloo/v1/layout/:sceneLayoutId', (req, res) => {
  */
 router.post('/igloo/v1/iglooId/layout/active', (req, res) => {
     const { swid, username } = req.player;
-    // The igloo ID is sent as plain text body
-    const iglooId = req.body;
+    // The igloo ID (its owner's swid, "{...}") is the whole body, sent without
+    // a content type, so Unity labels it form data; that parser can't read it
+    // and leaves its text in req.rawText (server.ts).
+    let iglooId = typeof req.body === 'string' ? req.body : req.rawText;
+    if (!iglooId && req.body && typeof req.body === 'object') iglooId = Object.keys(req.body)[0] || '';
+    iglooId = typeof iglooId === 'string' ? iglooId.trim().replace(/^"(.*)"$/, '$1') : '';
     
-    console.log(`[IGLOO] ${username} fetching active layout for igloo: ${iglooId}`);
+    console.log(`[IGLOO] ${username} fetching active layout for igloo: ${logSafe(iglooId)}`);
     
-    // For now, get the player's own active layout
-    // In a full implementation, this would look up by igloo owner's SWID
-    const iglooData = db.getIglooData ? db.getIglooData(username) : null;
+    // The igloo asked for, not the asker's: visitors call this when the owner
+    // changes the igloo (IglooLayoutReloader), and returning their own layout
+    // made them reload into their own furniture inside a friend's igloo.
+    const owner = iglooId && iglooId !== swid ? db.getPlayerBySwid(iglooId) : null;
+    const ownerName = owner?.username ?? username;
+    const iglooData = db.getIglooData ? db.getIglooData(ownerName) : null;
     
     if (iglooData && iglooData.activeLayout) {
         res.json(iglooData.activeLayout);
@@ -422,6 +456,7 @@ router.get('/igloo/v1/decorations', (req, res) => {
     
     console.log(`[IGLOO] ${username} fetching decorations`);
     
+    ensureQuestDecorations(username);
     const inventory = db.getDecorationInventory ? db.getDecorationInventory(username) : { items: [] };
     
     // Response: DecorationInventory
