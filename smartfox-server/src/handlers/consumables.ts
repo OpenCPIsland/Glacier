@@ -697,6 +697,7 @@ export function handleClientConChanged(ctx: HandlerContext, next: EquippedObject
   const gameProp = game && me ? game.gamePropFor(me) : null;
   if (gameProp && session.heldObject === gameProp && next?.name !== gameProp) {
     session.heldObject = undefined;
+    session.partyGameProp = undefined;
     onPartyGamePlayerQuit(session);
   }
   onLobbyPropPutAway(session, next?.name);
