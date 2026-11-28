@@ -136,7 +136,12 @@ function encryptionMiddleware(req, res, next) {
         try {
             const decrypted = decryptAes(req.rawBody, symmetricKey);
             const jsonStr = decrypted.toString('utf8');
-            req.body = JSON.parse(jsonStr);
+            // Some calls send a bare value (an igloo's SWID, a task id), not JSON.
+            try {
+                req.body = JSON.parse(jsonStr);
+            } catch {
+                req.body = jsonStr;
+            }
             console.log(`[ENCRYPTION] Decrypted request body for key ${keyId}`);
         } catch (err) {
             console.error(`[ENCRYPTION] Failed to decrypt request body:`, err.message);
