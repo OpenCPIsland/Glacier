@@ -50,6 +50,9 @@ export class Session {
   heldActionCount: number | undefined;
   // NameOnServer of whatever is in "con" (consumable, gear or dispensable).
   heldObject: string | undefined;
+  // The party game prop the server handed out (setPartyGameProp), so late
+  // joiners get it in the player's user variables.
+  partyGameProp: string | undefined;
   // "loc" user variable: Domain.LocomotionState byte (0 when cleared).
   locomotionState = 0;
   // Sitting (5) or Zipline (6), worked out from an l.a Interact: the client
