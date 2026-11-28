@@ -13,7 +13,7 @@ const router = express.Router();
 import * as db from "../database.ts";
 import config from "../config.ts";
 import { signedResponse, buildQuestStateCollection, withAvailableQuests, QuestStatus } from "../utils/response.ts";
-import { getMascotFromQuestId, addXpToInternal, ensureMinLevel } from "../utils/xp.ts";
+import { getMascotFromQuestId, addXpToInternal } from "../utils/xp.ts";
 import { logSafe } from "../utils/logSafe.ts";
 
 /**
@@ -375,13 +375,6 @@ router.post('/quest/v1/:questId', (req, res) => {
     if (newStatus === QuestStatus.SUSPENDED) {
         db.updateQuestStatus(username, questId, QuestStatus.SUSPENDED);
     }
-    
-    // Quest XP alone can't reach the level requirements of the next quests
-    // (see quests.json vs ProgressionMascotLevelXP.json), so lift the mascot
-    // to the level those quests need. Prevents soft-locks.
-    if (newStatus === QuestStatus.COMPLETED) {
-        unlockFollowUps(username);
-    }
 
     const response = {
         questId: questId,
@@ -394,34 +387,6 @@ router.post('/quest/v1/:questId', (req, res) => {
     if (reward) response.reward = reward;
     res.json(response);
 });
-
-/**
- * Raise mascot XP so every quest whose prerequisites are all completed also
- * meets its level requirement. Never lowers XP. Safe to call repeatedly, and
- * also usable to repair players who are already soft-locked (call it when a
- * player joins a room, before the quest collection is built).
- */
-function unlockFollowUps(username) {
-    const completed = new Set(
-        db.getQuests(username)
-            .filter(q => q.status === QuestStatus.COMPLETED || q.timesCompleted > 0)
-            .map(q => q.questId)
-    );
-    const xpByMascot = db.getMascotXP(username);
-
-    for (const [questId, def] of Object.entries(config.questDefinitions)) {
-        if (completed.has(questId)) continue;
-        if (!(def.prerequisites || []).every(p => completed.has(p))) continue;
-
-        const current = xpByMascot[def.mascot] || 0;
-        const raised = ensureMinLevel(def.mascot, current, def.levelRequirement || 0);
-        if (raised !== current) {
-            db.setMascotXP(username, def.mascot, raised);
-            xpByMascot[def.mascot] = raised;
-            console.log(`[QUEST] Raised ${def.mascot} XP for ${username}: ${current} -> ${raised} (needed for ${questId})`);
-        }
-    }
-}
 
 /**
  * Grant the reward for one quest objective. quest.c_obj carries only the
@@ -453,4 +418,4 @@ function grantQuestObjectiveReward(username, objectiveId) {
 }
 
 export default router;
-export { grantQuestObjectiveReward, unlockFollowUps };
+export { grantQuestObjectiveReward };
