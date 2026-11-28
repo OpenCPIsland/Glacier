@@ -83,19 +83,3 @@ export function getMascotFromQuestId(questId: string): string {
     if (questId.startsWith('GRY')) return 'Gary';
     return 'AuntArctic'; // Default
 }
-
-/**
- * Raise internal XP to at least the start of `minLevel` (never lowers it).
- * Used after a quest completes so that follow-up quests (preReqProgressLevel)
- * can never be soft-locked by quest XP alone being too low.
- *
- * @param {string} mascot - Mascot name
- * @param {number} currentInternalXp - Current internal XP value
- * @param {number} minLevel - Level (index) the player must have reached
- * @returns {number} Internal XP, >= minLevel * 1,000,000 (capped at max level)
- */
-export function ensureMinLevel(mascot: string, currentInternalXp: number, minLevel: number): number {
-    const maxLevel = getThresholds(mascot).length - 1;
-    const target = Math.min(Math.max(minLevel, 0), maxLevel) * INTERNAL_PER_LEVEL;
-    return Math.max(currentInternalXp, target);
-}
