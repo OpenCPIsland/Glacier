@@ -109,6 +109,10 @@ app.use(express.text({
 app.use((req, res, next) => {
     if (typeof req.body === 'string' && (req.headers['content-type'] || '').includes('application/x-www-form-urlencoded')) {
         const text = req.body.trim();
+        // Kept for the few calls whose body is a bare value rather than form
+        // data or JSON (GetActiveIglooLayoutOperation sends just the igloo's
+        // SWID, "{...}", which isn't JSON and would otherwise be lost).
+        req.rawText = text;
         let parsed = {};
         if (text.startsWith('{') || text.startsWith('[')) {
             try { parsed = JSON.parse(text); } catch { /* not JSON: leave it empty */ }
