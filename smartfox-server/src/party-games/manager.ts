@@ -97,6 +97,7 @@ export function guarded(game: PartyGameSession, fn: () => void): void {
 export function setPartyGameProp(entry: RegisteredSession, name: string | undefined): void {
   const s = entry.session;
   s.heldObject = name;
+  s.partyGameProp = name;
   const v = new SFSArrayWriter().putUtfString("con");
   if (name) v.putVariableType("object").putSFSObject(new SFSObjectWriter().putUtfString("type", "pgame").putUtfString("name", name));
   else v.putVariableType("null").putNull();
