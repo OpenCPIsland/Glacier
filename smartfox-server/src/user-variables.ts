@@ -37,11 +37,16 @@ export function buildUserVariablesArray(session: Session, forOwner = false): SFS
     varList.putSFSArray(intVar("colour", session.colour ?? 0));
     varList.putSFSArray(intVar("tube", session.selectedTubeId ?? 0));
   }
-  varList.putSFSArray(intVar("loc", 0)); // locomotionState
+  // locomotionState: late joiners see a party-game pose (GenericState1) too.
+  varList.putSFSArray(intVar("loc", session.locomotionState));
   varList.putSFSArray(intVar("awayfromkeyboard", 0));
   varList.putSFSArray(intVar("tempheadstatus", 0));
-  // A held consumable, so others see it in the player's hand.
-  if (session.equippedConsumable) {
+  if (session.partyGameProp && session.heldObject === session.partyGameProp) {
+    // A party game prop ("con" {type: pgame}), so late joiners see it held.
+    const con = new SFSObjectWriter().putUtfString("type", "pgame").putUtfString("name", session.partyGameProp);
+    varList.putSFSArray(new SFSArrayWriter().putUtfString("con").putVariableType("object").putSFSObject(con).putBool(false));
+  } else if (session.equippedConsumable) {
+    // A held consumable, so others see it in the player's hand.
     const con = new SFSObjectWriter().putUtfString("type", "consum").putUtfString("name", session.equippedConsumable);
     varList.putSFSArray(new SFSArrayWriter().putUtfString("con").putVariableType("object").putSFSObject(con).putBool(false));
     // A held tray or taken item ("con" + "con_prop" makes a PlayerHeldItem).
