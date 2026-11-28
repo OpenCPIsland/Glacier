@@ -1183,10 +1183,17 @@ function getPlayerPassword(swid) {
  */
 // last_activity is SQLite CURRENT_TIMESTAMP text ("YYYY-MM-DD HH:MM:SS",
 // UTC), so it's compared with datetime(), never with a JS ISO string. It's
-// only written when a room is joined; the game server deletes the row when
-// the connection closes (/api/internal/session-ended), so the window is
-// only a backstop for a game server that died without reporting.
-const SESSION_ONLINE_WINDOW = '-12 hours';
+// written when a room is joined and refreshed by the game server's heartbeat
+// (/api/internal/sessions-alive, every 10 minutes by default) while the
+// connection lasts; the row is deleted when it closes
+// (/api/internal/session-ended). The window only catches a close that never
+// arrived (a WebAPI restart, a timeout, a crashed game server): it used to be
+// 12 hours, which kept such ghosts in the population bars for half a day.
+// Three missed heartbeats; SESSION_ONLINE_MINUTES changes it (raise it if
+// the game server's heartbeat is slowed or turned off).
+const SESSION_ONLINE_MINUTES = /^\d+$/.test(process.env.SESSION_ONLINE_MINUTES ?? '') && Number(process.env.SESSION_ONLINE_MINUTES) > 0
+    ? Number(process.env.SESSION_ONLINE_MINUTES) : 30;
+const SESSION_ONLINE_WINDOW = `-${SESSION_ONLINE_MINUTES} minutes`;
 
 // A join counts as online once the game server reports its login
 // (confirmSession). Until then it counts for a short grace period, so a
@@ -1398,7 +1405,7 @@ function getActiveSessionsByRoom(clientVersion = null) {
  */
 function getActiveSessionsByWorldAndRoom(clientVersion) {
     const rows = db.prepare(`
-        SELECT world, room_name AS room, COUNT(*) AS count FROM player_sessions
+        SELECT world, room_name AS room, COUNT(DISTINCT swid) AS count FROM player_sessions
         WHERE ${ONLINE_SQL} AND room_name IS NOT NULL AND COALESCE(client_version, ?) = ?
         GROUP BY world, room_name
     `).all(SESSION_ONLINE_WINDOW, SESSION_CONNECT_GRACE, config.content.clientVersion, clientVersion);
@@ -2504,7 +2511,7 @@ function getFriendsIgloos(username, language) {
  */
 function getIglooPopulations(clientVersion = null) {
     const rows = db.prepare(`
-        SELECT instance_id, COUNT(*) AS count FROM player_sessions
+        SELECT instance_id, COUNT(DISTINCT swid) AS count FROM player_sessions
         WHERE world = 'Igloo' AND instance_id != '' AND ${ONLINE_SQL}
           AND (? IS NULL OR COALESCE(client_version, ?) = ?)
         GROUP BY instance_id
