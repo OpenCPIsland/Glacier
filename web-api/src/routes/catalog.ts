@@ -24,7 +24,10 @@ import schedules from "../../data/ClothingCatalogSchedules.json";
 // Test with schedule Id 7 (theme 65) to see which one the client expects.
 const SEND_SCHEDULE_ID = true;
 const SCHEDULE_YEAR = 2018;
-const SUBMISSION_REWARD = 100;
+// What the catalog shows for submitting: Dot's daily challenge
+// (ClothingCatalogSubmission) pays it, 30 coins, when claimed. Submitting
+// itself pays nothing.
+const SUBMISSION_REWARD = 30;
 
 const scheduleByDay = new Map<string, { Id: number; CatalogThemeId: number }>();
 for (const s of schedules) {
@@ -61,6 +64,7 @@ function thisWeeksThemeIds(): number[] {
 
 import * as db from "../database.ts";
 import * as smartfox from "../smartfoxNotifier.ts";
+import { incrementTask } from "./task.ts";
 import { generateEquipmentId } from "../utils/session.ts";
 import { NOT_ENOUGH_COINS } from "../utils/counts.ts";
 import { templateCost } from "../utils/prices.ts";
@@ -248,18 +252,11 @@ router.post('/catalog/v1/clothing/submit', (req, res) => {
     if (cost === null) return res.status(400).json({ error: 'Item has no cost' });
     
     // A submission lists a design the player already made and creates no
-    // item. The first one to the current theme challenge pays
-    // SUBMISSION_REWARD (the client shows the coins as "rewarded"); it used
-    // to pay every time and grant the template too.
-    const themeNow = currentThemeId();
-    const firstForTheme = scheduledThemeChallengeId === themeNow
-        && !(db.getCatalogSubmissions?.(null) ?? []).some((x) => x.creatorName === username && x.scheduledThemeChallengeId === themeNow);
-    if (firstForTheme) db.addPlayerCoins(username, SUBMISSION_REWARD);
-    
-    // Update catalog task
-    if (db.updateDailyTask) {
-        db.updateDailyTask(username, 'ClothingCatalogSubmission', 1, Date.now(), false);
-    }
+    // item, and pays nothing itself: the coins are Dot's daily challenge's.
+    // Counting the challenge used to write the row with day = Date.now(),
+    // a millisecond time where the task day is a day number, so the challenge
+    // never counted as done today and its claim was always refused.
+    const task = incrementTask(username, 'ClothingCatalogSubmission', 1);
     
     if (db.addCatalogSubmission) {
         db.addCatalogSubmission(username, {
@@ -278,8 +275,7 @@ router.post('/catalog/v1/clothing/submit', (req, res) => {
     // Get updated coin total
     const newCoinTotal = db.getPlayerCoins(username);
     
-    smartfox.notifyDailyTaskUpdate(username, 'ClothingCatalogSubmission', 1);
-    if (firstForTheme) smartfox.notifyCoinsUpdate(username, SUBMISSION_REWARD);
+    if (task?.changed) smartfox.notifyDailyTaskUpdate(username, 'ClothingCatalogSubmission', task.counter);
     
     // Response: ItemSubmissionResponse
     res.json({
